@@ -91,6 +91,27 @@ app.post('/webhook/elevenlabs', (req, res) => {
   event.has_user_audio = Boolean(event.has_user_audio);
   event.has_response_audio = Boolean(event.has_response_audio);
 
+  // Console log summary for Render logs
+  try {
+    const summary = {
+      received_at: new Date().toISOString(),
+      event_id: event.event_id || null,
+      agent_id: event.agent_id || null,
+      has_audio: event.has_audio,
+      has_user_audio: event.has_user_audio,
+      has_response_audio: event.has_response_audio,
+      raw_length: raw.length,
+      user_agent: req.get('user-agent') || null,
+      ip: req.ip || req.headers['x-forwarded-for'] || null
+    };
+    console.log('[webhook] received', summary);
+    // Optionally log a small preview of body (avoid huge logs)
+    const preview = raw.length > 500 ? raw.slice(0, 500) + '...(+truncated)' : raw;
+    console.log('[webhook] body preview:', preview);
+  } catch (e) {
+    console.warn('[webhook] logging failed', e);
+  }
+
   // Store with minimal envelope
   appendEvent({
     received_at: new Date().toISOString(),
