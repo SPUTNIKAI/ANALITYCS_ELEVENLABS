@@ -4,11 +4,17 @@ const bodyParser = require('body-parser');
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
+const { ensureSchema, insertWebhookEvent, fetchUnprocessed, markProcessed } = require('./db');
 
 const app = express();
 
-// Per docs: use raw body to compute HMAC over exact bytes
-app.use(bodyParser.raw({ type: '*/*' }));
+// Per docs: use raw body to compute HMAC over exact bytes for webhook route only
+app.use((req, res, next) => {
+  if (req.path === '/webhook/elevenlabs') {
+    return bodyParser.raw({ type: '*/*' })(req, res, next);
+  }
+  return bodyParser.json()(req, res, next);
+});
 
 const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET || '';
 const WEBHOOK_TOLERANCE_SEC = parseInt(process.env.WEBHOOK_TOLERANCE_SEC || '1800', 10);
@@ -60,23 +66,24 @@ function verifySignature(header, rawBuffer) {
     const a = Buffer.from(hmacHex, 'hex');
     const b = Buffer.from(signature, 'hex');
     if (a.length !== b.length) return false;
-    return crypto.timingSafeEqual(a, b);
+    return require('crypto').timingSafeEqual(a, b);
   } catch (_) {
     return false;
   }
 }
 
-// Simple JSONL event store
+// Simple JSONL event store (fallback)
+const fsLogs = require('fs');
 const logsDir = path.join(__dirname, '..', 'logs');
 const eventsFile = path.join(logsDir, 'events.jsonl');
-if (!fs.existsSync(logsDir)) fs.mkdirSync(logsDir, { recursive: true });
+if (!fsLogs.existsSync(logsDir)) fsLogs.mkdirSync(logsDir, { recursive: true });
 
 function appendEvent(event) {
   const line = JSON.stringify(event) + '\n';
-  fs.appendFileSync(eventsFile, line, { encoding: 'utf8' });
+  fsLogs.appendFileSync(eventsFile, line, { encoding: 'utf8' });
 }
 
-app.post('/webhook/elevenlabs', (req, res) => {
+app.post('/webhook/elevenlabs', async (req, res) => {
   const sigHeader = req.get('ElevenLabs-Signature') || req.get('elevenlabs-signature') || req.get('X-ElevenLabs-Signature');
   const rawBuffer = Buffer.isBuffer(req.body) ? req.body : Buffer.from(String(req.body || ''), 'utf8');
 
@@ -100,28 +107,32 @@ app.post('/webhook/elevenlabs', (req, res) => {
     return res.status(401).send('invalid signature');
   }
 
-  // Parse JSON only after signature is verified
-  let event = {};
+  let payloadObj = {};
   try {
-    event = JSON.parse(rawBuffer.toString('utf8'));
+    payloadObj = JSON.parse(rawBuffer.toString('utf8'));
   } catch (_) {
-    event = {};
+    payloadObj = {};
   }
 
-  // Normalize flags
-  event.has_audio = Boolean(event.has_audio);
-  event.has_user_audio = Boolean(event.has_user_audio);
-  event.has_response_audio = Boolean(event.has_response_audio);
+  const event_type = payloadObj.type || null;
+  const event_timestamp = payloadObj.event_timestamp || Math.floor(Date.now() / 1000);
+  const data = payloadObj.data || {};
+  const agent_id = data.agent_id || null;
+  const conversation_id = data.conversation_id || null;
+  const status = data.status || null;
 
-  // Console log summary for Render logs
+  const has_audio = Boolean(payloadObj.has_audio ?? data.has_audio);
+  const has_user_audio = Boolean(payloadObj.has_user_audio ?? data.has_user_audio);
+  const has_response_audio = Boolean(payloadObj.has_response_audio ?? data.has_response_audio);
+
   try {
     const summary = {
       received_at: new Date().toISOString(),
-      event_id: event.event_id || null,
-      agent_id: event.agent_id || null,
-      has_audio: event.has_audio,
-      has_user_audio: event.has_user_audio,
-      has_response_audio: event.has_response_audio,
+      event_id: payloadObj.event_id || null,
+      agent_id,
+      has_audio,
+      has_user_audio,
+      has_response_audio,
       raw_length: rawBuffer.length,
       user_agent: req.get('user-agent') || null,
       ip: req.ip || req.headers['x-forwarded-for'] || null
@@ -134,20 +145,65 @@ app.post('/webhook/elevenlabs', (req, res) => {
     console.warn('[webhook] logging failed', e);
   }
 
-  // Store with minimal envelope
-  appendEvent({
-    received_at: new Date().toISOString(),
-    headers: { 'ElevenLabs-Signature': sigHeader },
-    event
-  });
+  try {
+    const dbRes = await insertWebhookEvent({
+      event_type: event_type || 'unknown',
+      event_timestamp,
+      agent_id,
+      conversation_id,
+      status,
+      has_audio,
+      has_user_audio,
+      has_response_audio,
+      payload: payloadObj
+    });
+    if (!dbRes.inserted) {
+      appendEvent({ received_at: new Date().toISOString(), event: payloadObj });
+    }
+  } catch (e) {
+    console.warn('[webhook] db insert failed, writing to file', e);
+    appendEvent({ received_at: new Date().toISOString(), event: payloadObj });
+  }
 
   return res.status(200).send('ok');
+});
+
+// API: fetch unprocessed
+app.get('/api/events', async (req, res) => {
+  const limit = Math.max(1, Math.min(500, parseInt(req.query.limit || '100', 10)));
+  try {
+    const rows = await fetchUnprocessed(limit);
+    return res.status(200).json({ count: rows.length, events: rows });
+  } catch (e) {
+    return res.status(500).json({ error: 'failed_to_fetch', details: String(e) });
+  }
+});
+
+// API: mark processed
+app.post('/api/events/mark-processed', async (req, res) => {
+  try {
+    const ids = Array.isArray(req.body?.ids) ? req.body.ids : [];
+    const note = typeof req.body?.note === 'string' ? req.body.note : undefined;
+    const result = await markProcessed(ids, note);
+    return res.status(200).json(result);
+  } catch (e) {
+    return res.status(500).json({ error: 'failed_to_mark', details: String(e) });
+  }
 });
 
 app.get('/health', (_req, res) => {
   res.status(200).send('ok');
 });
 
-app.listen(PORT, () => {
-  console.log(`Server listening on :${PORT}`);
-});
+ensureSchema()
+  .then(() => {
+    app.listen(PORT, () => {
+      console.log(`Server listening on :${PORT}`);
+    });
+  })
+  .catch((e) => {
+    console.error('Failed to ensure schema', e);
+    app.listen(PORT, () => {
+      console.log(`Server listening on :${PORT} (without DB schema)`);
+    });
+  });
