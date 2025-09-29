@@ -1,0 +1,13 @@
+# Project Intelligence (.cursor/rules)
+
+- Профиль: экспертный разработчик; память очищается между сессиями → всегда читать memory-bank в начале задачи
+- Тема UI по умолчанию: light
+- Интеграция ElevenLabs:
+  - Эндпоинт: `/webhook/elevenlabs`
+  - Заголовок подписи: `ElevenLabs-Signature`
+  - Схема подписи: HMAC SHA-256 над `${timestamp}.${rawBody}` с секретом `WEBHOOK_SECRET`
+  - Допуск времени: ≤ 30 минут (настраиваемый `WEBHOOK_TOLERANCE_SEC`)
+  - Ответ: `200 OK` после успешного приёма
+  - Поля после 2025-08-15: `has_audio`, `has_user_audio`, `has_response_audio`
+  - Возможный IP-whitelisting статических IP ElevenLabs
+- Документация: см. `memory-bank/` и `memory-bank/integrations/elevenlabs-webhook.md`
