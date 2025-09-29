@@ -7,41 +7,57 @@ const path = require('path');
 
 const app = express();
 
-// Capture raw body for signature verification
-const rawBodySaver = (req, res, buf) => {
-  if (buf && buf.length) {
-    req.rawBody = buf.toString('utf8');
-  }
-};
-app.use(bodyParser.json({ verify: rawBodySaver }));
+// Per docs: use raw body to compute HMAC over exact bytes
+app.use(bodyParser.raw({ type: '*/*' }));
 
 const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET || '';
 const WEBHOOK_TOLERANCE_SEC = parseInt(process.env.WEBHOOK_TOLERANCE_SEC || '1800', 10);
 const PORT = parseInt(process.env.PORT || '3000', 10);
 
-function computeHmacHex(timestamp, rawBody) {
-  const payload = `${timestamp}.${rawBody}`;
-  return crypto.createHmac('sha256', WEBHOOK_SECRET).update(payload, 'utf8').digest('hex');
+function computeHmacHex(timestamp, rawBuffer) {
+  const hmac = crypto.createHmac('sha256', WEBHOOK_SECRET);
+  hmac.update(Buffer.from(String(timestamp), 'utf8'));
+  hmac.update(Buffer.from('.', 'utf8'));
+  hmac.update(rawBuffer);
+  return hmac.digest('hex');
 }
 
-function verifySignature(header, rawBody) {
+function parseSignatureHeader(headerValue) {
+  if (!headerValue) return null;
+  const headerStr = Array.isArray(headerValue) ? headerValue.join(',') : String(headerValue);
+  const parts = headerStr.split(',').map(p => p.trim());
+  const signatureKeys = new Set(['s', 'sig', 'signature', 'v0', 'v1']);
+  let timestamp = null;
+  let signature = null;
+  for (const part of parts) {
+    const [kRaw, vRaw] = part.split('=');
+    if (!kRaw || typeof vRaw === 'undefined') continue;
+    const key = kRaw.trim().toLowerCase();
+    const val = vRaw.trim().replace(/^"|"$/g, '');
+    if (key === 't' || key === 'timestamp') {
+      timestamp = val;
+    } else if (signatureKeys.has(key)) {
+      signature = val;
+    }
+  }
+  if (!timestamp || !signature) return null;
+  return { timestamp, signature };
+}
+
+function verifySignature(header, rawBuffer) {
   if (!header || !WEBHOOK_SECRET) return false;
-  // Expected format: "t=TIMESTAMP, s=HMAC_HEX"
-  const parts = header.split(',').map(p => p.trim());
-  const tPart = parts.find(p => p.startsWith('t='));
-  const sPart = parts.find(p => p.startsWith('s='));
-  if (!tPart || !sPart) return false;
-  const timestamp = tPart.slice(2);
-  const signature = sPart.slice(2);
+  const parsed = parseSignatureHeader(header);
+  if (!parsed) return false;
+  const { timestamp, signature } = parsed;
 
   const nowSec = Math.floor(Date.now() / 1000);
   const tsSec = parseInt(timestamp, 10);
   if (!Number.isFinite(tsSec)) return false;
   if (Math.abs(nowSec - tsSec) > WEBHOOK_TOLERANCE_SEC) return false;
 
-  const hmac = computeHmacHex(timestamp, rawBody);
+  const hmacHex = computeHmacHex(timestamp, rawBuffer);
   try {
-    const a = Buffer.from(hmac, 'hex');
+    const a = Buffer.from(hmacHex, 'hex');
     const b = Buffer.from(signature, 'hex');
     if (a.length !== b.length) return false;
     return crypto.timingSafeEqual(a, b);
@@ -61,23 +77,22 @@ function appendEvent(event) {
 }
 
 app.post('/webhook/elevenlabs', (req, res) => {
-  const sig = req.get('ElevenLabs-Signature');
-  const raw = req.rawBody || '';
-  if (!verifySignature(sig, raw)) {
-    // Debug log to help diagnose signature mismatches
+  const sigHeader = req.get('ElevenLabs-Signature') || req.get('elevenlabs-signature') || req.get('X-ElevenLabs-Signature');
+  const rawBuffer = Buffer.isBuffer(req.body) ? req.body : Buffer.from(String(req.body || ''), 'utf8');
+
+  if (!verifySignature(sigHeader, rawBuffer)) {
     try {
-      const parts = (sig || '').split(',').map(p => p.trim());
-      const tPart = parts.find(p => p.startsWith('t='));
-      const sPart = parts.find(p => p.startsWith('s='));
-      const ts = tPart ? tPart.slice(2) : 'n/a';
-      const provided = sPart ? sPart.slice(2) : 'n/a';
-      const expected = WEBHOOK_SECRET && ts !== 'n/a' ? computeHmacHex(ts, raw) : 'n/a';
+      const parsed = parseSignatureHeader(sigHeader || '');
+      const ts = parsed?.timestamp || 'n/a';
+      const provided = parsed?.signature || 'n/a';
+      const expected = WEBHOOK_SECRET && ts !== 'n/a' ? computeHmacHex(ts, rawBuffer) : 'n/a';
       console.warn('[webhook] invalid signature', {
         now: Math.floor(Date.now() / 1000),
         timestamp: ts,
-        rawLength: raw.length,
+        rawLength: rawBuffer.length,
         expectedHmac: expected,
-        providedHmac: provided
+        providedHmac: provided,
+        rawHeader: sigHeader || 'missing'
       });
     } catch (e) {
       console.warn('[webhook] invalid signature (logging failed)', e);
@@ -85,8 +100,15 @@ app.post('/webhook/elevenlabs', (req, res) => {
     return res.status(401).send('invalid signature');
   }
 
-  const event = req.body || {};
-  // Basic normalization for new fields post 2025-08-15
+  // Parse JSON only after signature is verified
+  let event = {};
+  try {
+    event = JSON.parse(rawBuffer.toString('utf8'));
+  } catch (_) {
+    event = {};
+  }
+
+  // Normalize flags
   event.has_audio = Boolean(event.has_audio);
   event.has_user_audio = Boolean(event.has_user_audio);
   event.has_response_audio = Boolean(event.has_response_audio);
@@ -100,13 +122,13 @@ app.post('/webhook/elevenlabs', (req, res) => {
       has_audio: event.has_audio,
       has_user_audio: event.has_user_audio,
       has_response_audio: event.has_response_audio,
-      raw_length: raw.length,
+      raw_length: rawBuffer.length,
       user_agent: req.get('user-agent') || null,
       ip: req.ip || req.headers['x-forwarded-for'] || null
     };
     console.log('[webhook] received', summary);
-    // Optionally log a small preview of body (avoid huge logs)
-    const preview = raw.length > 500 ? raw.slice(0, 500) + '...(+truncated)' : raw;
+    const previewStr = rawBuffer.toString('utf8');
+    const preview = previewStr.length > 500 ? previewStr.slice(0, 500) + '...(+truncated)' : previewStr;
     console.log('[webhook] body preview:', preview);
   } catch (e) {
     console.warn('[webhook] logging failed', e);
@@ -115,7 +137,7 @@ app.post('/webhook/elevenlabs', (req, res) => {
   // Store with minimal envelope
   appendEvent({
     received_at: new Date().toISOString(),
-    headers: { 'ElevenLabs-Signature': sig },
+    headers: { 'ElevenLabs-Signature': sigHeader },
     event
   });
 
