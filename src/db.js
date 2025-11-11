@@ -4,9 +4,10 @@ const DATABASE_URL = process.env.DATABASE_URL || '';
 
 let pool = null;
 if (DATABASE_URL) {
+  const isLocal = DATABASE_URL.includes('localhost') || DATABASE_URL.includes('127.0.0.1');
   pool = new Pool({
     connectionString: DATABASE_URL,
-    ssl: DATABASE_URL.includes('ssl=true') ? undefined : { rejectUnauthorized: false }
+    ssl: isLocal ? false : (DATABASE_URL.includes('ssl=true') ? undefined : { rejectUnauthorized: false })
   });
 }
 
@@ -33,6 +34,15 @@ async function ensureSchema() {
     create index if not exists webhook_events_conversation_id_idx on webhook_events (conversation_id);
     create index if not exists webhook_events_event_timestamp_idx on webhook_events (event_timestamp);
     create index if not exists webhook_events_processed_idx on webhook_events (processed, event_timestamp);
+
+    create table if not exists analyses (
+      id bigserial primary key,
+      event_id bigint not null references webhook_events(id) on delete cascade,
+      model text not null,
+      result jsonb not null,
+      created_at timestamptz default now()
+    );
+    create index if not exists analyses_event_id_idx on analyses (event_id);
   `);
 }
 
@@ -96,4 +106,13 @@ async function markProcessed(ids, note) {
   return { updated: rowCount };
 }
 
-module.exports = { pool, ensureSchema, insertWebhookEvent, fetchUnprocessed, markProcessed };
+async function insertAnalysis(eventId, model, result) {
+  if (!pool) return { inserted: false };
+  const { rows } = await pool.query(
+    `insert into analyses (event_id, model, result) values ($1,$2,$3) returning id`,
+    [eventId, model, result]
+  );
+  return { inserted: true, id: rows[0]?.id };
+}
+
+module.exports = { pool, ensureSchema, insertWebhookEvent, fetchUnprocessed, markProcessed, insertAnalysis };

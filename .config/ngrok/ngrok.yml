@@ -1,0 +1,13 @@
+version: 2
+authtoken: 315cs5J5UzxCFOLO6LkxDcpKkFI_47cMFvu2ZKdtDrLfRDFTE
+
+tunnels:
+  elevenlabs:
+    proto: http
+    addr: 3000
+    inspect: true
+    schemes:
+      - https
+      - http
+
+

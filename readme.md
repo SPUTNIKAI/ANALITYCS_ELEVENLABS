@@ -1,116 +1,57 @@
-Задача проекта - серкер который будет получать данные для дальнейшего анализа на webbhook POST 
-после усепшного разговора Агента 
+# ANALITYCS_ELEVENLABS
 
-Важные замечания
-Миграция формата: Компания ElevenLabs уведомляет об изменении формата Transcription Webhooks с 15 августа 2025 года. Убедитесь, что ваш обработчик может принимать новые поля has_audio, has_user_audio и has_response_audio.
+Сервер для приёма POST вебхуков ElevenLabs после завершения разговора агента.
 
-Безопасность: Для дополнительной защиты можно настроить IP-whitelisting, разрешив запросы только со статических IP-адресов ElevenLabs.
+## Запуск
 
-Надёжность: Ваш эндпоинт должен всегда возвращать статус 200 OK после успешного получения данных. Последовательные неудачи могут привести к автоматическому отключению вебхука.
+1. Установите зависимости:
+```bash
+npm install
+```
+2. Создайте `.env` по образцу:
+```bash
+cp .env.example .env
+```
+3. Запустите сервер:
+```bash
+npm start
+```
 
-Ссылка на docs 
-https://elevenlabs.io/docs/agents-platform/workflows/post-call-webhooks
+## Эндпоинты
+- `POST /webhook/elevenlabs` — приём вебхуков (требует заголовок `ElevenLabs-Signature`)
+- `GET /health` — проверка живости
 
+## Подпись
+- Формат заголовка: `t=TIMESTAMP, s=HMAC_HEX`
+- Сообщение для HMAC: `${timestamp}.${rawBody}` (сырой JSON)
+- Алгоритм: HMAC SHA-256, секрет `WEBHOOK_SECRET`
+- Допуск времени: `WEBHOOK_TOLERANCE_SEC` (по умолчанию 1800)
 
+## Логи
+- События пишутся в `logs/events.jsonl` (JSONL)
 
+## Аналитика LLM
+- Переменные окружения:
+  - `OPENAI_API_KEY` — ключ для OpenAI
+  - `ANALYZE_MODEL` — модель (по умолчанию `gpt-5`)
+  - `ANALYZE_AUTO` — автоанализ входящих событий (`true`/`false`)
+  - `ANALYZE_MAX_CONCURRENCY` / `ANALYZE_MIN_MS` — троттлинг
 
-вот пример с сайта elevenlabs 
+## Экспорт в CRM Markdown
+- Результаты анализа дополнительно пишутся в `memory-bank/crm.md`
+- Управление:
+  - `CRM_MD_ENABLED` — включить запись (`true` по умолчанию)
+  - `CRM_MD_PATH` — путь к целевому markdown (по умолчанию `memory-bank/crm.md`)
 
-const crypto = require('crypto');
-const secret = process.env.WEBHOOK_SECRET;
-const bodyParser = require('body-parser');
+## Внешняя CRM (БПМсофт / bpmsoft) — отправка аналитики
+- Включение: `EXTERNAL_CRM_ENABLED=true`
+- Настройки:
+  - `CRM_SERVICE_URL` — URL `.../ServiceModel/GeneratedObjectWebFormService.svc/SaveWebFormObjectData`
+  - `CRM_LANDING_ID` — GUID лендинга
+  - `CRM_BASIC_AUTH_USER` / `CRM_BASIC_AUTH_PASS` — (опционально) basic auth
+  - `CRM_TIMEOUT_MS` — таймаут запроса (по умолчанию 8000)
+  - `CRM_MAX_RETRIES` — число ретраев при ошибках (по умолчанию 2)
+- Поля отправки формируются как массивы `fields` и `contactFields` (name/value), совместимые с примерами из БПМсофт. В комментарий (`Commentary` / `UsrQualificationComment`) добавляется краткая аналитика: тема, намерение, оценка, итог, резюме, рекомендации, а также идентификаторы события/агента/диалога.
 
-// Ensure express js is parsing the raw body through instead of applying it's own encoding
-app.use(bodyParser.raw({ type: '*/*' }));
-
-// Example webhook handler
-app.post('/webhook/elevenlabs', async (req, res) => {
-  const headers = req.headers['ElevenLabs-Signature'].split(',');
-  const timestamp = headers.find((e) => e.startsWith('t=')).substring(2);
-  const signature = headers.find((e) => e.startsWith('v0='));
-
-  // Validate timestamp
-  const reqTimestamp = timestamp * 1000;
-  const tolerance = Date.now() - 30 * 60 * 1000;
-  if (reqTimestamp < tolerance) {
-    res.status(403).send('Request expired');
-    return;
-  } else {
-    // Validate hash
-    const message = `${timestamp}.${req.body}`;
-    const digest = 'v0=' + crypto.createHmac('sha256', secret).update(message).digest('hex');
-    if (signature !== digest) {
-      res.status(401).send('Request unauthorized');
-      return;
-    }
-  }
-
-  // Validation passed, continue processing ...
-
-  res.status(200).send();
-});
-
-
-пример написанный LLM
-const express = require('express');
-const crypto = require('crypto');
-
-const app = express();
-const port = 3000;
-// Замените на ваш секрет из настроек вебхука ElevenLabs
-const WEBHOOK_SECRET = 'your_webhook_secret_here';
-
-app.use(express.json({ limit: '10mb' })); // Для обработки больших тел запросов (аудио)
-
-app.post('/webhook', (req, res) => {
-  const signatureHeader = req.headers['elevenlabs-signature'];
-  const requestBody = JSON.stringify(req.body);
-  
-  // 1. Проверяем наличие заголовка с подписью
-  if (!signatureHeader) {
-    console.error('Missing ElevenLabs-Signature header');
-    return res.status(401).send('Unauthorized');
-  }
-
-  // 2. Извлекаем подпись и временную метку из заголовка
-  const { t: timestamp, v1: signature } = signatureHeader.split(',').reduce((acc, part) => {
-    const [key, value] = part.split('=');
-    acc[key] = value;
-    return acc;
-  }, {});
-
-  // 3. Проверяем временную метку (защита от повторных атак)
-  const now = Date.now();
-  const fiveMinutesAgo = now - (5 * 60 * 1000);
-  if (parseInt(timestamp) < fiveMinutesAgo) {
-    console.error('Timestamp is too old.');
-    return res.status(401).send('Unauthorized');
-  }
-
-  // 4. Проверяем HMAC-подпись
-  const expectedSignature = crypto
-    .createHmac('sha256', WEBHOOK_SECRET)
-    .update(timestamp + '.' + requestBody)
-    .digest('hex');
-
-  if (signature !== expectedSignature) {
-    console.error('Invalid signature.');
-    return res.status(401).send('Unauthorized');
-  }
-
-  // 5. Аутентификация успешна, обрабатываем данные
-  console.log('Webhook received and authenticated:');
-  console.log('Type:', req.body.type); // Например, 'post_call_transcription'
-  console.log('Conversation ID:', req.body.data?.conversation_id);
-  
-  // Ваша логика обработки данных здесь...
-  // Например, для транскрипции: 
-  // const transcript = req.body.data?.transcript;
-
-  // 6. Всегда отвечаем 200 OK после успешного получения
-  res.status(200).send('OK');
-});
-
-app.listen(port, () => {
-  console.log(`Webhook server listening at http://localhost:${port}`);
-});
+## Отладка
+- `DEBUG=true` — включает подробные логи пайплайна (webhook → store → analyze → write/send).

@@ -4,7 +4,15 @@ const bodyParser = require('body-parser');
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
-const { ensureSchema, insertWebhookEvent, fetchUnprocessed, markProcessed } = require('./db');
+const { ensureSchema, insertWebhookEvent, fetchUnprocessed, markProcessed, pool, insertAnalysis } = require('./db');
+const OpenAI = require('openai');
+const analyzeRouter = require('./routes/analyze');
+const eventsRouter = require('./routes/events');
+const Bottleneck = require('bottleneck');
+const { analyzeTranscript } = require('./analysis');
+const { appendCrmEntry } = require('./crmWriter');
+const { sendLeadAnalytics } = require('./externalCrm');
+const { dbg } = require('./logger');
 
 const app = express();
 
@@ -19,6 +27,12 @@ app.use((req, res, next) => {
 const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET || '';
 const WEBHOOK_TOLERANCE_SEC = parseInt(process.env.WEBHOOK_TOLERANCE_SEC || '1800', 10);
 const PORT = parseInt(process.env.PORT || '3000', 10);
+
+// Bottleneck settings
+const maxConcurrent = parseInt(process.env.ANALYZE_MAX_CONCURRENCY || '1', 10);
+const minTime = parseInt(process.env.ANALYZE_MIN_MS || '1500', 10);
+const autoAnalyze = (process.env.ANALYZE_AUTO || 'true') === 'true';
+const limiter = new Bottleneck({ maxConcurrent, minTime });
 
 function computeHmacHex(timestamp, rawBuffer) {
   const hmac = crypto.createHmac('sha256', WEBHOOK_SECRET);
@@ -83,6 +97,29 @@ function appendEvent(event) {
   fsLogs.appendFileSync(eventsFile, line, { encoding: 'utf8' });
 }
 
+async function analyzeEvent(event) {
+  const transcript = event?.payload?.data?.transcript || [];
+  dbg('[analyze] start', { event_id: event?.id, transcript_len: Array.isArray(transcript) ? transcript.length : 0, model: process.env.ANALYZE_MODEL || 'gpt-5' });
+  const result = await analyzeTranscript(transcript);
+  dbg('[analyze] result', { event_id: event?.id, topic: result?.topic, intent: result?.intent, quality: result?.quality, outcome: result?.outcome, phone: result?.phone });
+  const saved = await insertAnalysis(event.id, process.env.ANALYZE_MODEL || 'gpt-5', result);
+  await markProcessed([event.id], 'auto analyzed');
+  try {
+    await appendCrmEntry(event, result);
+  } catch (e) {
+    console.warn('crm append failed', e);
+  }
+  try {
+    const sent = await sendLeadAnalytics(event, result);
+    if (!sent?.sent) {
+      console.warn('external CRM send failed', sent);
+    }
+  } catch (e) {
+    console.warn('external CRM send threw', e);
+  }
+  return saved;
+}
+
 app.post('/webhook/elevenlabs', async (req, res) => {
   const sigHeader = req.get('ElevenLabs-Signature') || req.get('elevenlabs-signature') || req.get('X-ElevenLabs-Signature');
   const rawBuffer = Buffer.isBuffer(req.body) ? req.body : Buffer.from(String(req.body || ''), 'utf8');
@@ -110,6 +147,10 @@ app.post('/webhook/elevenlabs', async (req, res) => {
   let payloadObj = {};
   try {
     payloadObj = JSON.parse(rawBuffer.toString('utf8'));
+    dbg('[webhook] payload parsed', {
+      keys: Object.keys(payloadObj || {}),
+      transcript_len: Array.isArray(payloadObj?.data?.transcript) ? payloadObj.data.transcript.length : 0
+    });
   } catch (_) {
     payloadObj = {};
   }
@@ -138,9 +179,6 @@ app.post('/webhook/elevenlabs', async (req, res) => {
       ip: req.ip || req.headers['x-forwarded-for'] || null
     };
     console.log('[webhook] received', summary);
-    const previewStr = rawBuffer.toString('utf8');
-    const preview = previewStr.length > 500 ? previewStr.slice(0, 500) + '...(+truncated)' : previewStr;
-    console.log('[webhook] body preview:', preview);
   } catch (e) {
     console.warn('[webhook] logging failed', e);
   }
@@ -157,6 +195,7 @@ app.post('/webhook/elevenlabs', async (req, res) => {
       has_response_audio,
       payload: payloadObj
     });
+    dbg('[webhook] event stored', { inserted: dbRes?.inserted === true });
     if (!dbRes.inserted) {
       appendEvent({ received_at: new Date().toISOString(), event: payloadObj });
     }
@@ -165,34 +204,34 @@ app.post('/webhook/elevenlabs', async (req, res) => {
     appendEvent({ received_at: new Date().toISOString(), event: payloadObj });
   }
 
+  // Auto-trigger analysis in background (non-blocking)
+  if (autoAnalyze) {
+    try {
+      const rows = await fetchUnprocessed(1);
+      if (rows.length) {
+        const ev = rows[0];
+        dbg('[analyze] scheduling background analysis', { event_id: ev.id });
+        limiter.schedule(() => analyzeEvent(ev)).catch(err => console.warn('auto analyze failed', err));
+      }
+    } catch (e) {
+      console.warn('auto analyze scheduling failed', e);
+    }
+  }
+
   return res.status(200).send('ok');
 });
 
-// API: fetch unprocessed
-app.get('/api/events', async (req, res) => {
-  const limit = Math.max(1, Math.min(500, parseInt(req.query.limit || '100', 10)));
-  try {
-    const rows = await fetchUnprocessed(limit);
-    return res.status(200).json({ count: rows.length, events: rows });
-  } catch (e) {
-    return res.status(500).json({ error: 'failed_to_fetch', details: String(e) });
-  }
-});
-
-// API: mark processed
-app.post('/api/events/mark-processed', async (req, res) => {
-  try {
-    const ids = Array.isArray(req.body?.ids) ? req.body.ids : [];
-    const note = typeof req.body?.note === 'string' ? req.body.note : undefined;
-    const result = await markProcessed(ids, note);
-    return res.status(200).json(result);
-  } catch (e) {
-    return res.status(500).json({ error: 'failed_to_mark', details: String(e) });
-  }
-});
+// Mount analyze router under /api
+app.use('/api', analyzeRouter);
+app.use('/api', eventsRouter);
 
 app.get('/health', (_req, res) => {
   res.status(200).send('ok');
+});
+
+// Serve simple admin page
+app.get('/admin', (_req, res) => {
+  res.sendFile(path.join(__dirname, 'admin.html'));
 });
 
 ensureSchema()

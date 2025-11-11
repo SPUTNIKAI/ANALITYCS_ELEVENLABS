@@ -1,0 +1,4 @@
+{"event_id":"evt_secret_rotate","has_audio":true,"data":{"transcript":[
+  {"role":"user","message":"Меня зовут Ольга, телефон +375291234567"},
+  {"role":"agent","message":"Здравствуйте!"}
+]}}
