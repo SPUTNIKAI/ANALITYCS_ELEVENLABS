@@ -18,7 +18,9 @@
  - `ANALYZE_MAX_CONCURRENCY`, `ANALYZE_MIN_MS` — троттлинг очереди
  - `CRM_MD_ENABLED` — включение записи в markdown (`true` по умолчанию)
  - `CRM_MD_PATH` — путь к `crm.md`
- - `EXTERNAL_CRM_ENABLED`, `CRM_SERVICE_URL`, `CRM_LANDING_ID`, `CRM_BASIC_AUTH_USER`, `CRM_BASIC_AUTH_PASS`, `CRM_TIMEOUT_MS`, `CRM_MAX_RETRIES`
+- `EXTERNAL_CRM_ENABLED`, `CRM_SERVICE_URL`, `CRM_LANDING_ID`, `CRM_BASIC_AUTH_USER`, `CRM_BASIC_AUTH_PASS`, `CRM_TIMEOUT_MS`, `CRM_MAX_RETRIES`
+- `EXTERNAL_CRM_DRY_RUN` — сухой прогон внешней отправки (логируем payload, не шлём)
+- `CRM_TRUSTED_ORIGIN` — заголовок `Origin` для доверенного домена (например, `https://mir.utlik.pro`)
  - `DATABASE_URL` — строка подключения к PostgreSQL (локально без SSL; на Render — с SSL)
  - `DEBUG` — включает подробные логи
 

@@ -1,5 +1,6 @@
 const { setTimeout: sleep } = require('timers/promises');
 const { dbg } = require('./logger');
+const { hasSuccessfulCrmDispatch, insertCrmDispatchAttempt } = require('./db');
 
 const EXTERNAL_CRM_ENABLED = (process.env.EXTERNAL_CRM_ENABLED || 'false') === 'true';
 const CRM_SERVICE_URL = process.env.CRM_SERVICE_URL || '';
@@ -8,6 +9,8 @@ const CRM_BASIC_AUTH_USER = process.env.CRM_BASIC_AUTH_USER || '';
 const CRM_BASIC_AUTH_PASS = process.env.CRM_BASIC_AUTH_PASS || '';
 const CRM_TIMEOUT_MS = parseInt(process.env.CRM_TIMEOUT_MS || '8000', 10);
 const CRM_MAX_RETRIES = parseInt(process.env.CRM_MAX_RETRIES || '2', 10);
+const EXTERNAL_CRM_DRY_RUN = (process.env.EXTERNAL_CRM_DRY_RUN || 'false') === 'true';
+const CRM_TRUSTED_ORIGIN = process.env.CRM_TRUSTED_ORIGIN || '';
 
 function buildAuthorizationHeader() {
   if (CRM_BASIC_AUTH_USER && CRM_BASIC_AUTH_PASS) {
@@ -76,6 +79,7 @@ async function postToBpmsoft(payload) {
   const headers = { 'Content-Type': 'application/json' };
   const auth = buildAuthorizationHeader();
   if (auth) headers['Authorization'] = auth;
+  if (CRM_TRUSTED_ORIGIN) headers['Origin'] = CRM_TRUSTED_ORIGIN;
 
   const controller = new AbortController();
   const t = setTimeout(() => controller.abort(), CRM_TIMEOUT_MS);
@@ -93,20 +97,35 @@ async function postToBpmsoft(payload) {
   }
 }
 
-async function sendLeadAnalytics(eventRow, analysis) {
+async function sendLeadAnalytics(eventRow, analysis, options = {}) {
+  const force = Boolean(options.force);
   if (!EXTERNAL_CRM_ENABLED) {
     dbg('[crm] external CRM disabled, skip send');
     return { sent: false, reason: 'disabled' };
   }
   if (!CRM_SERVICE_URL || !CRM_LANDING_ID) return { sent: false, reason: 'not_configured' };
+  if (!force && eventRow?.id && await hasSuccessfulCrmDispatch(eventRow.id)) {
+    dbg('[crm] already sent for event, skip', { event_id: eventRow.id });
+    return { sent: false, reason: 'already_sent' };
+  }
   const payload = buildBpmsoftPayload(eventRow, analysis);
+
+  if (EXTERNAL_CRM_DRY_RUN) {
+    try { dbg('[crm] dry-run payload', { payload }); } catch {}
+    await insertCrmDispatchAttempt(eventRow?.id || null, payload, 'dry_run', null);
+    return { sent: false, reason: 'dry_run' };
+  }
 
   let attempt = 0;
   while (true) {
     try {
       const res = await postToBpmsoft(payload);
       dbg('[crm] sent', { status: res.status, ok: res.ok });
-      if (res.ok) return { sent: true };
+      if (res.ok) {
+        await insertCrmDispatchAttempt(eventRow?.id || null, payload, 'success', res.text || null);
+        return { sent: true };
+      }
+      await insertCrmDispatchAttempt(eventRow?.id || null, payload, 'error', res.text || null);
       attempt += 1;
       if (attempt > CRM_MAX_RETRIES) {
         return { sent: false, status: res.status, body: res.text };
@@ -115,6 +134,7 @@ async function sendLeadAnalytics(eventRow, analysis) {
     } catch (e) {
       attempt += 1;
       if (attempt > CRM_MAX_RETRIES) {
+        await insertCrmDispatchAttempt(eventRow?.id || null, payload, 'error', String(e));
         return { sent: false, error: String(e) };
       }
       await sleep(300 * attempt);

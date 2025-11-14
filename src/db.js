@@ -43,6 +43,16 @@ async function ensureSchema() {
       created_at timestamptz default now()
     );
     create index if not exists analyses_event_id_idx on analyses (event_id);
+
+    create table if not exists crm_dispatches (
+      id bigserial primary key,
+      event_id bigint not null references webhook_events(id) on delete cascade,
+      payload jsonb not null,
+      response_text text,
+      status text not null,
+      created_at timestamptz default now()
+    );
+    create index if not exists crm_dispatches_event_status_idx on crm_dispatches (event_id, status, created_at desc);
   `);
 }
 
@@ -115,4 +125,46 @@ async function insertAnalysis(eventId, model, result) {
   return { inserted: true, id: rows[0]?.id };
 }
 
-module.exports = { pool, ensureSchema, insertWebhookEvent, fetchUnprocessed, markProcessed, insertAnalysis };
+async function hasSuccessfulCrmDispatch(eventId) {
+  if (!pool) return false;
+  const { rows } = await pool.query(
+    `select 1 from crm_dispatches where event_id = $1 and status = 'success' limit 1`,
+    [eventId]
+  );
+  return rows.length > 0;
+}
+
+async function insertCrmDispatchAttempt(eventId, payload, status, responseText) {
+  if (!pool) return { inserted: false };
+  await pool.query(
+    `insert into crm_dispatches (event_id, payload, status, response_text) values ($1,$2,$3,$4)`,
+    [eventId, payload, status, responseText || null]
+  );
+  return { inserted: true };
+}
+
+async function getEventById(eventId) {
+  if (!pool) return null;
+  const { rows } = await pool.query(
+    `select id, event_type, event_timestamp, agent_id, conversation_id, status,
+            has_audio, has_user_audio, has_response_audio, payload, received_at, processed, processed_at, processor_note
+     from webhook_events where id = $1`,
+    [eventId]
+  );
+  return rows[0] || null;
+}
+
+async function getLatestAnalysisByEventId(eventId) {
+  if (!pool) return null;
+  const { rows } = await pool.query(
+    `select id, model, result, created_at
+     from analyses
+     where event_id = $1
+     order by created_at desc
+     limit 1`,
+    [eventId]
+  );
+  return rows[0] || null;
+}
+
+module.exports = { pool, ensureSchema, insertWebhookEvent, fetchUnprocessed, markProcessed, insertAnalysis, hasSuccessfulCrmDispatch, insertCrmDispatchAttempt, getEventById, getLatestAnalysisByEventId };
