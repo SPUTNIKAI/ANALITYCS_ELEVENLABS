@@ -11,6 +11,7 @@ const CRM_TIMEOUT_MS = parseInt(process.env.CRM_TIMEOUT_MS || '8000', 10);
 const CRM_MAX_RETRIES = parseInt(process.env.CRM_MAX_RETRIES || '2', 10);
 const EXTERNAL_CRM_DRY_RUN = (process.env.EXTERNAL_CRM_DRY_RUN || 'false') === 'true';
 const CRM_TRUSTED_ORIGIN = process.env.CRM_TRUSTED_ORIGIN || '';
+const CRM_REFERER = process.env.CRM_REFERER || '';
 
 function buildAuthorizationHeader() {
   if (CRM_BASIC_AUTH_USER && CRM_BASIC_AUTH_PASS) {
@@ -51,6 +52,9 @@ function buildBpmsoftPayload(eventRow, analysis) {
   const contact = extractContactFromEvent(eventRow, analysis);
 
   const fields = [
+    // Поля формы виджета: Name / MobilePhone
+    { name: 'Name', value: contact.fullName || '' },
+    { name: 'MobilePhone', value: contact.phone || '' },
     { name: 'Commentary', value: comment },
     { name: 'UsrQualificationComment', value: comment },
     { name: 'UsrTSLeadStatus', value: analysis?.outcome || '' },
@@ -80,6 +84,7 @@ async function postToBpmsoft(payload) {
   const auth = buildAuthorizationHeader();
   if (auth) headers['Authorization'] = auth;
   if (CRM_TRUSTED_ORIGIN) headers['Origin'] = CRM_TRUSTED_ORIGIN;
+  if (CRM_REFERER) headers['Referer'] = CRM_REFERER;
 
   const controller = new AbortController();
   const t = setTimeout(() => controller.abort(), CRM_TIMEOUT_MS);
@@ -120,7 +125,9 @@ async function sendLeadAnalytics(eventRow, analysis, options = {}) {
   while (true) {
     try {
       const res = await postToBpmsoft(payload);
-      dbg('[crm] sent', { status: res.status, ok: res.ok });
+      try {
+        dbg('[crm] sent', { status: res.status, ok: res.ok, body_preview: (res.text || '').slice(0, 500) });
+      } catch {}
       if (res.ok) {
         await insertCrmDispatchAttempt(eventRow?.id || null, payload, 'success', res.text || null);
         return { sent: true };
