@@ -47,12 +47,11 @@ function extractContactFromEvent(eventRow, analysis) {
 }
 
 function buildBpmsoftPayload(eventRow, analysis) {
-  // Совместим с примерами: используем массивы fields/contactFields с name/value
+  // Совместим с фронтовым виджетом: формируем formData { formId, formFieldsData, contactFieldsData, options }
   const comment = buildCommentary(eventRow, analysis);
   const contact = extractContactFromEvent(eventRow, analysis);
 
-  const fields = [
-    // Поля формы виджета: Name / MobilePhone
+  const formFieldsData = [
     { name: 'Name', value: contact.fullName || '' },
     { name: 'MobilePhone', value: contact.phone || '' },
     { name: 'Commentary', value: comment },
@@ -66,16 +65,19 @@ function buildBpmsoftPayload(eventRow, analysis) {
     { name: 'UsrConversationId', value: eventRow?.conversation_id || '' }
   ].filter(f => f.value);
 
-  const contactFields = [
+  const contactFieldsData = [
     { name: 'FullName', value: contact.fullName || '' },
     { name: 'Phone', value: contact.phone || '' },
     { name: 'Email', value: contact.email || '' }
   ].filter(f => f.value);
 
   return {
-    landingId: CRM_LANDING_ID,
-    fields,
-    contactFields
+    formData: {
+      formId: CRM_LANDING_ID,
+      formFieldsData,
+      contactFieldsData,
+      options: { extendResponseWithExceptionType: true }
+    }
   };
 }
 
