@@ -88,6 +88,32 @@ async function postToBpmsoft(payload) {
   if (CRM_TRUSTED_ORIGIN) headers['Origin'] = CRM_TRUSTED_ORIGIN;
   if (CRM_REFERER) headers['Referer'] = CRM_REFERER;
 
+  // Логируем полный запрос к CRM (всегда, не только при DEBUG)
+  try {
+    const logHeaders = {
+      'Content-Type': headers['Content-Type'],
+      Origin: headers['Origin'] || '(не задан)',
+      Referer: headers['Referer'] || '(не задан)'
+    };
+    console.log('[crm] отправка в CRM:', {
+      url: CRM_SERVICE_URL,
+      headers: logHeaders,
+      payload: {
+        formData: {
+          formId: payload.formData?.formId || '(нет)',
+          formFieldsData: payload.formData?.formFieldsData || [],
+          contactFieldsData: payload.formData?.contactFieldsData || [],
+          options: payload.formData?.options || {}
+        }
+      }
+    });
+    // Детальный вывод всех полей
+    console.log('[crm] поля formFieldsData:', JSON.stringify(payload.formData?.formFieldsData || [], null, 2));
+    console.log('[crm] поля contactFieldsData:', JSON.stringify(payload.formData?.contactFieldsData || [], null, 2));
+  } catch (e) {
+    console.warn('[crm] ошибка логирования запроса:', e);
+  }
+
   const controller = new AbortController();
   const t = setTimeout(() => controller.abort(), CRM_TIMEOUT_MS);
   try {
