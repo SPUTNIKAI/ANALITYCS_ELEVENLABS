@@ -51,8 +51,9 @@ function buildBpmsoftPayload(eventRow, analysis) {
   const comment = buildCommentary(eventRow, analysis);
   const contact = extractContactFromEvent(eventRow, analysis);
 
+  // Name и MobilePhone - обязательные для отображения в CRM, отправляем даже если пустые
   const formFieldsData = [
-    { name: 'Name', value: contact.fullName || '' },
+    { name: 'Name', value: contact.fullName || 'Клиент из звонка' },
     { name: 'MobilePhone', value: contact.phone || '' },
     { name: 'Commentary', value: comment },
     { name: 'UsrQualificationComment', value: comment },
@@ -63,13 +64,23 @@ function buildBpmsoftPayload(eventRow, analysis) {
     { name: 'UsrEventId', value: eventRow?.id != null ? String(eventRow.id) : '' },
     { name: 'UsrAgentId', value: eventRow?.agent_id || '' },
     { name: 'UsrConversationId', value: eventRow?.conversation_id || '' }
-  ].filter(f => f.value);
+  ].filter(f => f.value || f.name === 'Name'); // Name всегда отправляем, остальные только с value
 
   const contactFieldsData = [
-    { name: 'FullName', value: contact.fullName || '' },
+    { name: 'FullName', value: contact.fullName || 'Клиент из звонка' },
     { name: 'Phone', value: contact.phone || '' },
     { name: 'Email', value: contact.email || '' }
-  ].filter(f => f.value);
+  ].filter(f => f.value || f.name === 'FullName'); // FullName всегда отправляем, остальные только с value
+
+  // Логируем источник данных для отладки
+  const payload = eventRow?.payload || {};
+  const data = payload?.data || {};
+  dbg('[crm] contact data source', {
+    from_payload_contact: data?.contact || {},
+    from_payload_user: { name: payload.user_name, phone: payload.user_phone, email: payload.user_email },
+    from_analysis: { client_name: analysis?.client_name, phone: analysis?.phone },
+    extracted: contact
+  });
 
   return {
     formData: {
