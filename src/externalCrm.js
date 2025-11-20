@@ -53,6 +53,7 @@ function buildBpmsoftPayload(eventRow, analysis) {
   const contact = extractContactFromEvent(eventRow, analysis);
 
   // Разбираем телефон на код и последние 7 цифр (UsrPhoneNumberCode / UsrTelephoneNumberForCode)
+  // Если телефона нет — используем дефолтные значения для обязательных полей CRM
   let phoneCode = '';
   let phoneLocal = '';
   if (contact.phone) {
@@ -64,9 +65,15 @@ function buildBpmsoftPayload(eventRow, analysis) {
       const codeDigits = digits.slice(0, digits.length - 7);
       phoneCode = contact.phone.trim().startsWith('+') ? `+${codeDigits}` : codeDigits;
     }
+  } else {
+    // Дефолтные значения, если телефон отсутствует в транскрипте
+    phoneLocal = '0000000';
+    phoneCode = '+000';
   }
 
-  // Name и MobilePhone - обязательные для отображения в CRM, отправляем даже если пустые
+  // Обязательные поля: Name, LeadSource, UsrPhoneNumberCode, UsrTelephoneNumberForCode
+  const mandatoryFields = ['Name', 'LeadSource', 'UsrPhoneNumberCode', 'UsrTelephoneNumberForCode'];
+  
   const formFieldsData = [
     { name: 'Name', value: contact.fullName || 'Клиент из звонка' },
     { name: 'MobilePhone', value: contact.phone || '' },
@@ -83,7 +90,7 @@ function buildBpmsoftPayload(eventRow, analysis) {
     { name: 'UsrEventId', value: eventRow?.id != null ? String(eventRow.id) : '' },
     { name: 'UsrAgentId', value: eventRow?.agent_id || '' },
     { name: 'UsrConversationId', value: eventRow?.conversation_id || '' }
-  ].filter(f => f.value || f.name === 'Name'); // Name всегда отправляем, остальные только с value
+  ].filter(f => f.value || mandatoryFields.includes(f.name)); // Обязательные всегда, остальные только с value
 
   const contactFieldsData = [
     { name: 'FullName', value: contact.fullName || 'Клиент из звонка' },
@@ -91,14 +98,15 @@ function buildBpmsoftPayload(eventRow, analysis) {
     { name: 'Email', value: contact.email || '' }
   ].filter(f => f.value || f.name === 'FullName'); // FullName всегда отправляем, остальные только с value
 
-  // Логируем источник данных для отладки
+  // Логируем источник данных для отладки (всегда, не только при DEBUG)
   const payload = eventRow?.payload || {};
   const data = payload?.data || {};
-  dbg('[crm] contact data source', {
+  console.log('[crm] извлечение контакта:', {
     from_payload_contact: data?.contact || {},
     from_payload_user: { name: payload.user_name, phone: payload.user_phone, email: payload.user_email },
     from_analysis: { client_name: analysis?.client_name, phone: analysis?.phone },
-    extracted: contact
+    extracted_contact: contact,
+    phone_parsed: { phoneCode, phoneLocal, original: contact.phone }
   });
 
   return {
