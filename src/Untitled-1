@@ -1,0 +1,13 @@
+export URL='https://analitycs-agent-mmir.onrender.com/webhook/elevenlabs'
+export SECRET='wsec_1d94a54aeef280c89e86ebf275e313e4133cc0960746a5af57d5a1e20535720c'
+export TS=$(date +%s)
+# ВАЖНО: подпись считаем ровно по тем же байтам, которые отправим
+cat > /tmp/eleven_msg <<EOF
+$TS.
+EOF
+cat src/payload_llm_text.json >> /tmp/eleven_msg
+HMAC=$(openssl dgst -sha256 -hmac "wsec_1d94a54aeef280c89e86ebf275e313e4133cc0960746a5af57d5a1e20535720c" -binary /tmp/eleven_msg | xxd -p -c 256)
+curl -X POST "$URL" \
+  -H "Content-Type: application/json" \
+  -H "ElevenLabs-Signature: t=$TS, s=$HMAC" \
+  --data-binary @src/payload_llm_text.json -i

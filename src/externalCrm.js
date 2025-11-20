@@ -12,6 +12,7 @@ const CRM_MAX_RETRIES = parseInt(process.env.CRM_MAX_RETRIES || '2', 10);
 const EXTERNAL_CRM_DRY_RUN = (process.env.EXTERNAL_CRM_DRY_RUN || 'false') === 'true';
 const CRM_TRUSTED_ORIGIN = process.env.CRM_TRUSTED_ORIGIN || '';
 const CRM_REFERER = process.env.CRM_REFERER || '';
+const CRM_LEAD_SOURCE = process.env.CRM_LEAD_SOURCE || 'LLM Analytics';
 
 function buildAuthorizationHeader() {
   if (CRM_BASIC_AUTH_USER && CRM_BASIC_AUTH_PASS) {
@@ -51,10 +52,28 @@ function buildBpmsoftPayload(eventRow, analysis) {
   const comment = buildCommentary(eventRow, analysis);
   const contact = extractContactFromEvent(eventRow, analysis);
 
+  // Разбираем телефон на код и последние 7 цифр (UsrPhoneNumberCode / UsrTelephoneNumberForCode)
+  let phoneCode = '';
+  let phoneLocal = '';
+  if (contact.phone) {
+    const digits = String(contact.phone).replace(/\D/g, '');
+    if (digits.length <= 7) {
+      phoneLocal = digits;
+    } else {
+      phoneLocal = digits.slice(-7);
+      const codeDigits = digits.slice(0, digits.length - 7);
+      phoneCode = contact.phone.trim().startsWith('+') ? `+${codeDigits}` : codeDigits;
+    }
+  }
+
   // Name и MobilePhone - обязательные для отображения в CRM, отправляем даже если пустые
   const formFieldsData = [
     { name: 'Name', value: contact.fullName || 'Клиент из звонка' },
     { name: 'MobilePhone', value: contact.phone || '' },
+    // Обязательные для создания лида поля источника и телефона
+    { name: 'LeadSource', value: CRM_LEAD_SOURCE },
+    { name: 'UsrTelephoneNumberForCode', value: phoneLocal || '' },
+    { name: 'UsrPhoneNumberCode', value: phoneCode || '' },
     { name: 'Commentary', value: comment },
     { name: 'UsrQualificationComment', value: comment },
     { name: 'UsrTSLeadStatus', value: analysis?.outcome || '' },
