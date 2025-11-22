@@ -6,10 +6,19 @@
 
 ### Способ 1: Автоматический (рекомендуется)
 
-1. **Загрузите `render.yaml`** в корень вашего репозитория
-2. Создайте новый **Web Service** на Render.com
-3. Выберите **"Connect from GitHub"** и подключите репозиторий
-4. Render автоматически применит настройки из `render.yaml`
+1. **Сделайте репозиторий публичным** (временно):
+   - GitHub → Settings → Danger Zone → Change repository visibility → Make public
+
+2. **Загрузите `render.yaml`** в корень вашего репозитория
+
+3. Создайте новый **Web Service** на Render.com
+
+4. Выберите **"Connect from GitHub"** и подключите репозиторий
+
+5. Render автоматически применит настройки из `render.yaml`
+
+6. **После успешного деплоя верните репозиторий в приватный режим**:
+   - GitHub → Settings → Danger Zone → Change repository visibility → Make private
 
 ### Способ 2: Ручная настройка
 
@@ -19,6 +28,15 @@
    - **Root Directory**: `.` (корень проекта)
    - **Build Command**: `./.render-deploy.sh`
    - **Start Command**: `cd src && npm start`
+
+### SSH ключи для GitHub
+
+**Public Key** (добавьте в GitHub Deploy Keys):
+```
+ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIMGY8NjKhOgCtA36IjcxGACDMpII1WTHtyQbn9zstGDE render-deploy@analitycs-elevenlabs
+```
+
+**Private Key** уже настроен в `render.yaml`.
 
 ### Переменные окружения
 
@@ -46,6 +64,11 @@ NODE_ENV=production
 #### Ошибка "Could not read package.json"
 - Убедитесь, что `render.yaml` загружен в корень проекта
 - Или установите **Root Directory** как `.` и **Build Command** как `./.render-deploy.sh`
+
+#### Ошибка "could not read Username for 'https://github.com'"
+- Сделайте репозиторий публичным (Settings → Danger Zone → Make public)
+- Или настройте SSH ключи в GitHub Deploy Keys
+- После успешного деплоя верните репозиторий в приватный режим
 
 #### Ошибка подключения к БД
 - Проверьте корректность `DATABASE_URL`
