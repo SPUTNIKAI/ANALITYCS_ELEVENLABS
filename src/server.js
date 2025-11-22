@@ -15,6 +15,12 @@ const { appendCrmEntry } = require('./crmWriter');
 const { sendLeadAnalytics } = require('./externalCrm');
 const { dbg } = require('./logger');
 
+// For Render deployment - create logs directory if it doesn't exist
+const logsDir = path.join(__dirname, '..', 'logs');
+if (!fs.existsSync(logsDir)) {
+  fs.mkdirSync(logsDir, { recursive: true });
+}
+
 const app = express();
 
 // Cookie parser middleware
@@ -107,14 +113,11 @@ function verifySignature(header, rawBuffer) {
 }
 
 // Simple JSONL event store (fallback)
-const fsLogs = require('fs');
-const logsDir = path.join(__dirname, '..', 'logs');
 const eventsFile = path.join(logsDir, 'events.jsonl');
-if (!fsLogs.existsSync(logsDir)) fsLogs.mkdirSync(logsDir, { recursive: true });
 
 function appendEvent(event) {
   const line = JSON.stringify(event) + '\n';
-  fsLogs.appendFileSync(eventsFile, line, { encoding: 'utf8' });
+  fs.appendFileSync(eventsFile, line, { encoding: 'utf8' });
 }
 
 async function analyzeEvent(event) {

@@ -1,0 +1,20 @@
+services:
+  - type: web
+    name: analitycs-elevenlabs
+    runtime: node
+    rootDir: src
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        fromSecret: database_url
+      - key: WEBHOOK_SECRET
+        fromSecret: webhook_secret
+      - key: OPENAI_API_KEY
+        fromSecret: openai_api_key
+      - key: ADMIN_USERNAME
+        fromSecret: admin_username
+      - key: ADMIN_PASSWORD
+        fromSecret: admin_password
