@@ -1,6 +1,7 @@
 require('dotenv').config();
 const express = require('express');
 const bodyParser = require('body-parser');
+const cookieParser = require('cookie-parser');
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
@@ -16,6 +17,9 @@ const { dbg } = require('./logger');
 
 const app = express();
 
+// Cookie parser middleware
+app.use(cookieParser());
+
 // Per docs: use raw body to compute HMAC over exact bytes for webhook route only
 app.use((req, res, next) => {
   if (req.path === '/webhook/elevenlabs') {
@@ -27,6 +31,22 @@ app.use((req, res, next) => {
 const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET || '';
 const WEBHOOK_TOLERANCE_SEC = parseInt(process.env.WEBHOOK_TOLERANCE_SEC || '1800', 10);
 const PORT = parseInt(process.env.PORT || '3000', 10);
+
+// Admin authentication
+const ADMIN_USERNAME = process.env.ADMIN_USERNAME || 'admin';
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'admin123';
+
+// Authentication middleware
+function requireAuth(req, res, next) {
+  const authCookie = req.cookies?.admin_auth;
+  if (authCookie === 'authenticated') {
+    return next();
+  }
+
+  // Store the original URL for redirect after login
+  const returnTo = encodeURIComponent(req.originalUrl);
+  res.redirect(`/login?returnTo=${returnTo}`);
+}
 
 // Bottleneck settings
 const maxConcurrent = parseInt(process.env.ANALYZE_MAX_CONCURRENCY || '1', 10);
@@ -229,12 +249,36 @@ app.get('/health', (_req, res) => {
   res.status(200).send('ok');
 });
 
-// Serve admin pages
-app.get('/admin', (_req, res) => {
+// Authentication routes
+app.get('/login', (req, res) => {
+  res.sendFile(path.join(__dirname, 'login.html'));
+});
+
+app.post('/login', express.urlencoded({ extended: true }), (req, res) => {
+  const { username, password, returnTo } = req.body;
+
+  console.log('Login attempt:', { username, provided: password, expected: ADMIN_PASSWORD });
+
+  if (username === ADMIN_USERNAME && password === ADMIN_PASSWORD) {
+    res.cookie('admin_auth', 'authenticated', {
+      httpOnly: true,
+      maxAge: 24 * 60 * 60 * 1000, // 24 hours
+      sameSite: 'strict'
+    });
+
+    const redirectUrl = returnTo ? decodeURIComponent(returnTo) : '/leads';
+    res.redirect(redirectUrl);
+  } else {
+    res.redirect('/login?error=1&returnTo=' + encodeURIComponent(returnTo || ''));
+  }
+});
+
+// Serve admin pages (protected)
+app.get('/admin', requireAuth, (_req, res) => {
   res.sendFile(path.join(__dirname, 'admin.html'));
 });
 
-app.get('/leads', (_req, res) => {
+app.get('/leads', requireAuth, (_req, res) => {
   res.sendFile(path.join(__dirname, 'leads.html'));
 });
 
