@@ -1,6 +1,6 @@
 // init-schema.js
-const { ensureSchema } = require('./src/db');
 require('dotenv').config();
+const { ensureSchema } = require('./src/db');
 
 (async () => {
   try {
