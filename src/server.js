@@ -257,8 +257,6 @@ app.get('/login', (req, res) => {
 app.post('/login', express.urlencoded({ extended: true }), (req, res) => {
   const { username, password, returnTo } = req.body;
 
-  console.log('Login attempt:', { username, provided: password, expected: ADMIN_PASSWORD });
-
   if (username === ADMIN_USERNAME && password === ADMIN_PASSWORD) {
     res.cookie('admin_auth', 'authenticated', {
       httpOnly: true,
