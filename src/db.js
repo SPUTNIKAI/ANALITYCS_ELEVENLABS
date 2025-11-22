@@ -13,6 +13,7 @@ if (DATABASE_URL) {
 
 async function ensureSchema() {
   if (!pool) return;
+  // 1) Создаём таблицы (без индексов) — это гарантированно проходит на пустой БД
   await pool.query(`
     create table if not exists webhook_events (
       id bigserial primary key,
@@ -30,16 +31,6 @@ async function ensureSchema() {
       processor_note text,
       received_at timestamptz default now()
     );
-    create index if not exists webhook_events_agent_id_idx on webhook_events (agent_id);
-    create index if not exists webhook_events_conversation_id_idx on webhook_events (conversation_id);
-    create index if not exists webhook_events_event_timestamp_idx on webhook_events (event_timestamp);
-    create index if not exists webhook_events_processed_idx on webhook_events (processed, event_timestamp);
-
-    -- Additional indexes for leads filtering and sorting
-    create index if not exists analyses_quality_idx on analyses using gin ((result->'quality'));
-    create index if not exists analyses_topic_idx on analyses using gin ((result->'topic'));
-    create index if not exists analyses_client_name_idx on analyses using gin ((result->'client_name'));
-    create index if not exists analyses_phone_idx on analyses using gin ((result->'phone'));
 
     create table if not exists analyses (
       id bigserial primary key,
@@ -48,7 +39,6 @@ async function ensureSchema() {
       result jsonb not null,
       created_at timestamptz default now()
     );
-    create index if not exists analyses_event_id_idx on analyses (event_id);
 
     create table if not exists crm_dispatches (
       id bigserial primary key,
@@ -58,7 +48,34 @@ async function ensureSchema() {
       status text not null,
       created_at timestamptz default now()
     );
-    create index if not exists crm_dispatches_event_status_idx on crm_dispatches (event_id, status, created_at desc);
+  `);
+
+  // 2) Отдельным запросом создаём индексы — таблицы уже существуют
+  await pool.query(`
+    create index if not exists webhook_events_agent_id_idx
+      on webhook_events (agent_id);
+    create index if not exists webhook_events_conversation_id_idx
+      on webhook_events (conversation_id);
+    create index if not exists webhook_events_event_timestamp_idx
+      on webhook_events (event_timestamp);
+    create index if not exists webhook_events_processed_idx
+      on webhook_events (processed, event_timestamp);
+
+    create index if not exists analyses_event_id_idx
+      on analyses (event_id);
+
+    -- Индексы для фильтрации лидов
+    create index if not exists analyses_quality_idx
+      on analyses using gin ((result->'quality'));
+    create index if not exists analyses_topic_idx
+      on analyses using gin ((result->'topic'));
+    create index if not exists analyses_client_name_idx
+      on analyses using gin ((result->'client_name'));
+    create index if not exists analyses_phone_idx
+      on analyses using gin ((result->'phone'));
+
+    create index if not exists crm_dispatches_event_status_idx
+      on crm_dispatches (event_id, status, created_at desc);
   `);
 }
 
