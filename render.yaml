@@ -2,9 +2,9 @@ services:
   - type: web
     name: analitycs-elevenlabs
     runtime: node
-    rootDir: src
-    buildCommand: npm install
-    startCommand: npm start
+    rootDir: .
+    buildCommand: ./.render-deploy.sh
+    startCommand: cd src && npm start
     envVars:
       - key: NODE_ENV
         value: production
