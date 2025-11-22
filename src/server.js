@@ -229,9 +229,13 @@ app.get('/health', (_req, res) => {
   res.status(200).send('ok');
 });
 
-// Serve simple admin page
+// Serve admin pages
 app.get('/admin', (_req, res) => {
   res.sendFile(path.join(__dirname, 'admin.html'));
+});
+
+app.get('/leads', (_req, res) => {
+  res.sendFile(path.join(__dirname, 'leads.html'));
 });
 
 ensureSchema()

@@ -1,0 +1,483 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Лиды — Управление звонками</title>
+  <style>
+    /* Modern CSS Reset */
+    *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+    body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Oxygen,Ubuntu,Cantarell,sans-serif;line-height:1.5;color:#1f2937;background:#f9fafb}
+    .container{max-width:1400px;margin:0 auto;padding:20px}
+    .header{background:white;border-radius:12px;padding:24px;margin-bottom:24px;box-shadow:0 1px 3px rgba(0,0,0,.1);border:1px solid #e5e7eb}
+    .header h1{font-size:28px;font-weight:700;color:#111827;margin-bottom:8px}
+    .header p{color:#6b7280;font-size:16px}
+    .filters{background:white;border-radius:12px;padding:20px;margin-bottom:24px;box-shadow:0 1px 3px rgba(0,0,0,.1);border:1px solid #e5e7eb}
+    .filters-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px;margin-bottom:16px}
+    .filter-group{display:flex;flex-direction:column}
+    .filter-group label{font-weight:500;color:#374151;margin-bottom:4px;font-size:14px}
+    .filter-group input,.filter-group select{border:1px solid #d1d5db;border-radius:8px;padding:8px 12px;font-size:14px;background:white}
+    .filter-group input:focus,.filter-group select:focus{outline:none;border-color:#3b82f6;box-shadow:0 0 0 3px rgba(59,130,246,.1)}
+    .filter-actions{display:flex;gap:12px;align-items:center}
+    .btn{border:none;border-radius:8px;padding:8px 16px;font-size:14px;font-weight:500;cursor:pointer;transition:all .2s}
+    .btn-primary{background:#3b82f6;color:white}
+    .btn-primary:hover{background:#2563eb}
+    .btn-secondary{background:#f3f4f6;color:#374151;border:1px solid #d1d5db}
+    .btn-secondary:hover{background:#e5e7eb}
+    .table-container{background:white;border-radius:12px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,.1);border:1px solid #e5e7eb}
+    .table{overflow-x:auto}
+    .table table{width:100%;border-collapse:collapse}
+    .table th,.table td{padding:12px 16px;text-align:left;border-bottom:1px solid #e5e7eb;font-size:14px}
+    .table th{font-weight:600;color:#374151;background:#f9fafb;position:sticky;top:0;z-index:10}
+    .table tbody tr:hover{background:#f9fafb}
+    .table tbody tr{cursor:pointer}
+    .quality-badge{display:inline-block;padding:2px 8px;border-radius:12px;font-size:12px;font-weight:500}
+    .quality-1{background:#fef2f2;color:#991b1b}
+    .quality-2{background:#fef3c7;color:#d97706}
+    .quality-3{background:#fef3c7;color:#d97706}
+    .quality-4{background:#dbeafe;color:#2563eb}
+    .quality-5{background:#dcfce7;color:#16a34a}
+    .pagination{display:flex;justify-content:center;gap:8px;margin-top:24px;padding-bottom:24px}
+    .page-btn{border:1px solid #d1d5db;background:white;color:#374151;padding:8px 12px;border-radius:6px;cursor:pointer;font-size:14px}
+    .page-btn:hover{background:#f9fafb}
+    .page-btn.active{background:#3b82f6;color:white;border-color:#3b82f6}
+    .page-btn:disabled{background:#f3f4f6;color:#9ca3af;cursor:not-allowed}
+    .loading{text-align:center;padding:40px;color:#6b7280;font-size:16px}
+    .empty-state{text-align:center;padding:60px 20px;color:#6b7280}
+    .empty-state h3{font-size:18px;font-weight:600;color:#374151;margin-bottom:8px}
+    .modal{position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;z-index:1000;padding:20px}
+    .modal.hidden{display:none}
+    .modal-content{background:white;border-radius:12px;max-width:800px;width:100%;max-height:90vh;overflow-y:auto;box-shadow:0 20px 25px -5px rgba(0,0,0,.1)}
+    .modal-header{padding:20px 24px;border-bottom:1px solid #e5e7eb;display:flex;justify-content:space-between;align-items:center}
+    .modal-header h2{font-size:20px;font-weight:600;color:#111827;margin:0}
+    .modal-close{background:none;border:none;font-size:24px;color:#6b7280;cursor:pointer;padding:4px}
+    .modal-close:hover{color:#374151}
+    .modal-body{padding:24px}
+    .detail-grid{display:grid;grid-template-columns:200px 1fr;gap:12px;margin-bottom:16px}
+    .detail-label{font-weight:600;color:#374151}
+    .detail-value{color:#4b5563;word-break:break-word}
+    .detail-section{margin-top:24px;padding-top:16px;border-top:1px solid #e5e7eb}
+    .detail-section h3{font-size:16px;font-weight:600;color:#374151;margin-bottom:12px}
+    .transcript{font-family:monospace;font-size:14px;background:#f8fafc;padding:16px;border-radius:8px;border:1px solid #e5e7eb;max-height:300px;overflow-y:auto;white-space:pre-wrap}
+    .actions{margin-top:16px;display:flex;gap:8px}
+    .btn-small{padding:6px 12px;font-size:12px}
+    .error-message{background:#fef2f2;color:#991b1b;padding:12px;border-radius:8px;border:1px solid #fecaca;margin-bottom:16px}
+    @media (max-width:768px){
+      .container{padding:12px}
+      .filters-grid{grid-template-columns:1fr}
+      .table th,.table td{padding:8px 12px;font-size:13px}
+      .detail-grid{grid-template-columns:1fr}
+      .modal-body{padding:16px}
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header class="header">
+      <h1>Управление лидами</h1>
+      <p>Просмотр и управление всеми лидами из базы данных</p>
+    </header>
+
+    <div class="filters">
+      <div class="filters-grid">
+        <div class="filter-group">
+          <label for="dateFrom">Дата от</label>
+          <input type="date" id="dateFrom">
+        </div>
+        <div class="filter-group">
+          <label for="dateTo">Дата до</label>
+          <input type="date" id="dateTo">
+        </div>
+        <div class="filter-group">
+          <label for="agentId">Agent ID</label>
+          <input type="text" id="agentId" placeholder="ID агента">
+        </div>
+        <div class="filter-group">
+          <label for="quality">Качество</label>
+          <select id="quality">
+            <option value="">Все</option>
+            <option value="1">1 - Плохо</option>
+            <option value="2">2 - Ниже среднего</option>
+            <option value="3">3 - Средне</option>
+            <option value="4">4 - Хорошо</option>
+            <option value="5">5 - Отлично</option>
+          </select>
+        </div>
+        <div class="filter-group">
+          <label for="clientName">Имя клиента</label>
+          <input type="text" id="clientName" placeholder="Поиск по имени">
+        </div>
+        <div class="filter-group">
+          <label for="phone">Телефон</label>
+          <input type="text" id="phone" placeholder="Поиск по телефону">
+        </div>
+      </div>
+      <div class="filter-actions">
+        <button class="btn btn-primary" id="applyFilters">Применить фильтры</button>
+        <button class="btn btn-secondary" id="resetFilters">Сбросить</button>
+        <select id="sortBy" style="margin-left:auto">
+          <option value="date">Сортировать по дате</option>
+          <option value="quality">Сортировать по качеству</option>
+          <option value="client_name">Сортировать по клиенту</option>
+          <option value="topic">Сортировать по теме</option>
+        </select>
+        <select id="sortOrder">
+          <option value="desc">По убыванию</option>
+          <option value="asc">По возрастанию</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="table-container">
+      <div class="table">
+        <table>
+          <thead>
+            <tr>
+              <th>Дата/время</th>
+              <th>Agent ID</th>
+              <th>Клиент</th>
+              <th>Телефон</th>
+              <th>Тема</th>
+              <th>Качество</th>
+              <th>Статус</th>
+            </tr>
+          </thead>
+          <tbody id="leadsTableBody">
+            <tr>
+              <td colspan="7" class="loading">Загрузка лидов...</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="pagination" id="pagination"></div>
+    </div>
+  </div>
+
+  <div class="modal hidden" id="leadModal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2>Детали лида</h2>
+        <button class="modal-close" id="closeModal">&times;</button>
+      </div>
+      <div class="modal-body" id="modalBody">
+        <div class="loading">Загрузка деталей...</div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // Global state
+    let currentPage = 1;
+    let currentFilters = {};
+    let currentSort = { by: 'date', order: 'desc' };
+
+    // Utility functions
+    function formatDate(ts) {
+      if (!ts) return '';
+      try {
+        const d = new Date(ts * 1000);
+        return d.toLocaleString('ru-RU');
+      } catch (e) {
+        return String(ts);
+      }
+    }
+
+    function getQualityBadge(quality) {
+      if (quality === null || quality === undefined) return '';
+      const q = parseInt(quality);
+      if (isNaN(q)) return '';
+      const classes = ['quality-1', 'quality-2', 'quality-3', 'quality-4', 'quality-5'];
+      return `<span class="quality-badge ${classes[q-1] || ''}">${q}</span>`;
+    }
+
+    function showError(message) {
+      const tbody = document.getElementById('leadsTableBody');
+      tbody.innerHTML = `<tr><td colspan="7" class="error-message">${message}</td></tr>`;
+    }
+
+    function showEmpty(message = 'Лиды не найдены') {
+      const tbody = document.getElementById('leadsTableBody');
+      tbody.innerHTML = `<tr><td colspan="7" class="empty-state"><h3>${message}</h3></td></tr>`;
+    }
+
+    // API functions
+    async function fetchLeads(page = 1) {
+      const params = new URLSearchParams({
+        page: page.toString(),
+        limit: '20',
+        sortBy: currentSort.by,
+        sortOrder: currentSort.order
+      });
+
+      Object.entries(currentFilters).forEach(([key, value]) => {
+        if (value) params.set(key, value);
+      });
+
+      const response = await fetch(`/api/events?${params.toString()}`);
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+      return await response.json();
+    }
+
+    async function fetchLeadDetails(id) {
+      const response = await fetch(`/api/events/${id}`);
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+      return await response.json();
+    }
+
+    async function resendToCrm(id) {
+      const response = await fetch(`/api/events/${id}/resend-crm`, {
+        method: 'POST'
+      });
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+      return await response.json();
+    }
+
+    // UI update functions
+    function renderLeads(data) {
+      const tbody = document.getElementById('leadsTableBody');
+      tbody.innerHTML = '';
+
+      if (!data || data.length === 0) {
+        showEmpty();
+        return;
+      }
+
+      data.forEach(lead => {
+        const row = document.createElement('tr');
+        row.innerHTML = `
+          <td>${formatDate(lead.event_timestamp)}</td>
+          <td>${lead.agent_id || ''}</td>
+          <td>${lead.client_name || ''}</td>
+          <td>${lead.phone || ''}</td>
+          <td>${lead.topic || ''}</td>
+          <td>${getQualityBadge(lead.quality)}</td>
+          <td>${lead.outcome || ''}</td>
+        `;
+        row.addEventListener('click', () => showLeadModal(lead.id));
+        tbody.appendChild(row);
+      });
+    }
+
+    function renderPagination(totalPages, currentPage) {
+      const pagination = document.getElementById('pagination');
+      pagination.innerHTML = '';
+
+      if (totalPages <= 1) return;
+
+      const maxVisible = 5;
+      let start = Math.max(1, currentPage - Math.floor(maxVisible / 2));
+      let end = Math.min(totalPages, start + maxVisible - 1);
+
+      if (end - start + 1 < maxVisible) {
+        start = Math.max(1, end - maxVisible + 1);
+      }
+
+      // Previous button
+      if (currentPage > 1) {
+        const prevBtn = document.createElement('button');
+        prevBtn.className = 'page-btn';
+        prevBtn.textContent = '←';
+        prevBtn.addEventListener('click', () => loadPage(currentPage - 1));
+        pagination.appendChild(prevBtn);
+      }
+
+      // Page numbers
+      for (let i = start; i <= end; i++) {
+        const pageBtn = document.createElement('button');
+        pageBtn.className = `page-btn ${i === currentPage ? 'active' : ''}`;
+        pageBtn.textContent = i.toString();
+        pageBtn.addEventListener('click', () => loadPage(i));
+        pagination.appendChild(pageBtn);
+      }
+
+      // Next button
+      if (currentPage < totalPages) {
+        const nextBtn = document.createElement('button');
+        nextBtn.className = 'page-btn';
+        nextBtn.textContent = '→';
+        nextBtn.addEventListener('click', () => loadPage(currentPage + 1));
+        pagination.appendChild(nextBtn);
+      }
+    }
+
+    async function showLeadModal(leadId) {
+      const modal = document.getElementById('leadModal');
+      const modalBody = document.getElementById('modalBody');
+
+      modal.classList.remove('hidden');
+      modalBody.innerHTML = '<div class="loading">Загрузка деталей...</div>';
+
+      try {
+        const { event, analysis } = await fetchLeadDetails(leadId);
+
+        const transcript = Array.isArray(event?.payload?.data?.transcript)
+          ? event.payload.data.transcript.map(x => `[${x.role}] ${x.message}`).join('\n')
+          : '';
+
+        modalBody.innerHTML = `
+          <div class="detail-grid">
+            <div class="detail-label">ID события:</div>
+            <div class="detail-value">${event.id}</div>
+          </div>
+          <div class="detail-grid">
+            <div class="detail-label">Дата/время:</div>
+            <div class="detail-value">${formatDate(event.event_timestamp)}</div>
+          </div>
+          <div class="detail-grid">
+            <div class="detail-label">Agent ID:</div>
+            <div class="detail-value">${event.agent_id || 'N/A'}</div>
+          </div>
+          <div class="detail-grid">
+            <div class="detail-label">Conversation ID:</div>
+            <div class="detail-value">${event.conversation_id || 'N/A'}</div>
+          </div>
+          <div class="detail-grid">
+            <div class="detail-label">Аудио:</div>
+            <div class="detail-value">
+              has_audio=${String(event.has_audio || false)};
+              user_audio=${String(event.has_user_audio || false)};
+              response_audio=${String(event.has_response_audio || false)}
+            </div>
+          </div>
+          ${analysis ? `
+            <div class="detail-grid">
+              <div class="detail-label">Тема:</div>
+              <div class="detail-value">${analysis.result?.topic || 'N/A'}</div>
+            </div>
+            <div class="detail-grid">
+              <div class="detail-label">Намерение:</div>
+              <div class="detail-value">${analysis.result?.intent || 'N/A'}</div>
+            </div>
+            <div class="detail-grid">
+              <div class="detail-label">Качество:</div>
+              <div class="detail-value">${getQualityBadge(analysis.result?.quality)}</div>
+            </div>
+            <div class="detail-grid">
+              <div class="detail-label">Итог:</div>
+              <div class="detail-value">${analysis.result?.outcome || 'N/A'}</div>
+            </div>
+            <div class="detail-grid">
+              <div class="detail-label">Клиент:</div>
+              <div class="detail-value">${analysis.result?.client_name || 'N/A'}</div>
+            </div>
+            <div class="detail-grid">
+              <div class="detail-label">Телефон:</div>
+              <div class="detail-value">${analysis.result?.phone || 'N/A'}</div>
+            </div>
+            <div class="detail-grid">
+              <div class="detail-label">Резюме:</div>
+              <div class="detail-value">${analysis.result?.summary_ru || 'N/A'}</div>
+            </div>
+            <div class="detail-grid">
+              <div class="detail-label">Рекомендации:</div>
+              <div class="detail-value">${analysis.result?.recommendations || 'N/A'}</div>
+            </div>
+          ` : '<div class="detail-grid"><div class="detail-label">Анализ:</div><div class="detail-value">Не выполнен</div></div>'}
+
+          ${transcript ? `
+            <div class="detail-section">
+              <h3>Транскрипт разговора</h3>
+              <div class="transcript">${transcript.replace(/</g, '&lt;')}</div>
+            </div>
+          ` : ''}
+
+          <div class="actions">
+            <button class="btn btn-primary btn-small" onclick="resendLeadToCrm(${event.id})">Переотправить в CRM</button>
+          </div>
+        `;
+      } catch (error) {
+        modalBody.innerHTML = `<div class="error-message">Ошибка загрузки деталей: ${error.message}</div>`;
+      }
+    }
+
+    async function resendLeadToCrm(leadId) {
+      try {
+        const result = await resendToCrm(leadId);
+        alert(`Успешно отправлено в CRM: ${JSON.stringify(result)}`);
+      } catch (error) {
+        alert(`Ошибка отправки в CRM: ${error.message}`);
+      }
+    }
+
+    function closeModal() {
+      document.getElementById('leadModal').classList.add('hidden');
+    }
+
+    // Main functions
+    async function loadPage(page) {
+      currentPage = page;
+      await loadLeads();
+    }
+
+    async function loadLeads() {
+      try {
+        const response = await fetchLeads(currentPage);
+        renderLeads(response.data);
+        renderPagination(response.pagination.totalPages, response.pagination.page);
+      } catch (error) {
+        showError(`Ошибка загрузки лидов: ${error.message}`);
+        document.getElementById('pagination').innerHTML = '';
+      }
+    }
+
+    function applyFilters() {
+      currentFilters = {
+        dateFrom: document.getElementById('dateFrom').value,
+        dateTo: document.getElementById('dateTo').value,
+        agentId: document.getElementById('agentId').value.trim(),
+        quality: document.getElementById('quality').value,
+        clientName: document.getElementById('clientName').value.trim(),
+        phone: document.getElementById('phone').value.trim()
+      };
+      currentPage = 1;
+      loadLeads();
+    }
+
+    function resetFilters() {
+      document.getElementById('dateFrom').value = '';
+      document.getElementById('dateTo').value = '';
+      document.getElementById('agentId').value = '';
+      document.getElementById('quality').value = '';
+      document.getElementById('clientName').value = '';
+      document.getElementById('phone').value = '';
+      currentFilters = {};
+      currentPage = 1;
+      loadLeads();
+    }
+
+    function changeSort() {
+      currentSort = {
+        by: document.getElementById('sortBy').value,
+        order: document.getElementById('sortOrder').value
+      };
+      currentPage = 1;
+      loadLeads();
+    }
+
+    // Event listeners
+    document.getElementById('applyFilters').addEventListener('click', applyFilters);
+    document.getElementById('resetFilters').addEventListener('click', resetFilters);
+    document.getElementById('sortBy').addEventListener('change', changeSort);
+    document.getElementById('sortOrder').addEventListener('change', changeSort);
+    document.getElementById('closeModal').addEventListener('click', closeModal);
+
+    // Close modal when clicking outside
+    document.getElementById('leadModal').addEventListener('click', (e) => {
+      if (e.target.id === 'leadModal') {
+        closeModal();
+      }
+    });
+
+    // Initialize
+    document.addEventListener('DOMContentLoaded', () => {
+      loadLeads();
+    });
+  </script>
+</body>
+</html>

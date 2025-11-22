@@ -17,9 +17,28 @@ cp .env.example .env
 npm start
 ```
 
-## Эндпоинты
+## Эндпоинты API
 - `POST /webhook/elevenlabs` — приём вебхуков (требует заголовок `ElevenLabs-Signature`)
+- `GET /api/events` — получение списка событий/лидов с фильтрацией и сортировкой
+- `GET /api/events/:id` — получение деталей конкретного события
+- `POST /api/events/:id/resend-crm` — повторная отправка лида в CRM
 - `GET /health` — проверка живости
+
+## Веб-интерфейсы
+- `GET /leads` — современный интерфейс для просмотра и управления лидами
+- `GET /admin` — устаревший интерфейс (перенаправляет на `/leads`)
+
+## Фильтрация и поиск лидов
+API `/api/events` поддерживает следующие параметры фильтрации:
+- `dateFrom`/`dateTo` — фильтр по диапазону дат
+- `agentId` — фильтр по ID агента
+- `quality` — фильтр по качеству (1-5)
+- `topic` — поиск по теме (ILIKE)
+- `clientName` — поиск по имени клиента (ILIKE)
+- `phone` — поиск по телефону (ILIKE)
+- `sortBy` — сортировка по: `date`, `quality`, `client_name`, `topic`
+- `sortOrder` — порядок сортировки: `asc`/`desc`
+- `page`/`limit` — пагинация
 
 ## Подпись
 - Формат заголовка: `t=TIMESTAMP, s=HMAC_HEX`

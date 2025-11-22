@@ -35,6 +35,12 @@ async function ensureSchema() {
     create index if not exists webhook_events_event_timestamp_idx on webhook_events (event_timestamp);
     create index if not exists webhook_events_processed_idx on webhook_events (processed, event_timestamp);
 
+    -- Additional indexes for leads filtering and sorting
+    create index if not exists analyses_quality_idx on analyses using gin ((result->'quality'));
+    create index if not exists analyses_topic_idx on analyses using gin ((result->'topic'));
+    create index if not exists analyses_client_name_idx on analyses using gin ((result->'client_name'));
+    create index if not exists analyses_phone_idx on analyses using gin ((result->'phone'));
+
     create table if not exists analyses (
       id bigserial primary key,
       event_id bigint not null references webhook_events(id) on delete cascade,

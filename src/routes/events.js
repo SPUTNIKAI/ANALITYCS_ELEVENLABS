@@ -20,37 +20,59 @@ router.get('/events', async (req, res) => {
     const limit = Math.min(Math.max(parseInt(req.query.limit || '20', 10), 1), 100);
     const offset = (page - 1) * limit;
 
+    // Parse filter parameters
     const dateFrom = req.query.dateFrom ? toEpochSeconds(req.query.dateFrom) : null;
     const dateTo = req.query.dateTo ? toEpochSeconds(req.query.dateTo) : null;
     const agentId = req.query.agentId ? String(req.query.agentId) : null;
+    const quality = req.query.quality ? parseInt(req.query.quality, 10) : null;
+    const topic = req.query.topic ? String(req.query.topic).trim() : null;
+    const clientName = req.query.clientName ? String(req.query.clientName).trim() : null;
+    const phone = req.query.phone ? String(req.query.phone).trim() : null;
+    const sortBy = req.query.sortBy || 'date';
+    const sortOrder = req.query.sortOrder === 'asc' ? 'asc' : 'desc';
 
+    // Build WHERE conditions
     const where = [];
-    const params = [];
+    const whereParams = [];
 
     if (dateFrom) {
-      params.push(dateFrom);
-      where.push(`e.event_timestamp >= $${params.length}`);
+      whereParams.push(dateFrom);
+      where.push(`e.event_timestamp >= $${whereParams.length}`);
     }
     if (dateTo) {
-      params.push(dateTo);
-      where.push(`e.event_timestamp <= $${params.length}`);
+      whereParams.push(dateTo);
+      where.push(`e.event_timestamp <= $${whereParams.length}`);
     }
     if (agentId) {
-      params.push(agentId);
-      where.push(`e.agent_id = $${params.length}`);
+      whereParams.push(agentId);
+      where.push(`e.agent_id = $${whereParams.length}`);
+    }
+    if (quality !== null && !isNaN(quality)) {
+      whereParams.push(quality.toString());
+      where.push(`a.result->>'quality' = $${whereParams.length}`);
+    }
+    if (topic) {
+      whereParams.push(`%${topic}%`);
+      where.push(`a.result->>'topic' ILIKE $${whereParams.length}`);
+    }
+    if (clientName) {
+      whereParams.push(`%${clientName}%`);
+      where.push(`a.result->>'client_name' ILIKE $${whereParams.length}`);
+    }
+    if (phone) {
+      whereParams.push(`%${phone}%`);
+      where.push(`a.result->>'phone' ILIKE $${whereParams.length}`);
     }
 
     const whereSql = where.length ? `where ${where.join(' and ')}` : '';
 
-    const countSql = `select count(*) as cnt from webhook_events e ${whereSql}`;
-    const { rows: countRows } = await pool.query(countSql, params);
+    // Count query
+    const countSql = `select count(*) as cnt from webhook_events e left join lateral (select result from analyses a where a.event_id = e.id order by a.created_at desc limit 1) a on true ${whereSql}`;
+    const { rows: countRows } = await pool.query(countSql, whereParams);
     const total = parseInt(countRows?.[0]?.cnt || '0', 10);
 
-    params.push(limit);
-    const limitIdx = params.length;
-    params.push(offset);
-    const offsetIdx = params.length;
-
+    // List query with simple sorting (only by date for now)
+    const listParams = [...whereParams, limit, offset];
     const listSql = `
       select
         e.id,
@@ -73,11 +95,11 @@ router.get('/events', async (req, res) => {
         limit 1
       ) a on true
       ${whereSql}
-      order by e.event_timestamp desc
-      limit $${limitIdx} offset $${offsetIdx}
+      order by e.event_timestamp ${sortOrder}
+      limit $${listParams.length - 1} offset $${listParams.length}
     `;
 
-    const { rows } = await pool.query(listSql, params);
+    const { rows } = await pool.query(listSql, listParams);
 
     const data = rows.map(r => ({
       id: r.id,
@@ -99,6 +121,7 @@ router.get('/events', async (req, res) => {
     const totalPages = total === 0 ? 0 : Math.ceil(total / limit);
     return res.status(200).json({ data, pagination: { page, limit, total, totalPages } });
   } catch (e) {
+    console.error('Events API error:', e);
     return res.status(500).json({ error: 'failed_to_list_events', details: String(e) });
   }
 });
