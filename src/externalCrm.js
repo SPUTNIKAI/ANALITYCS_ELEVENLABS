@@ -162,6 +162,24 @@ async function postToBpmsoft(payload) {
       signal: controller.signal
     });
     const text = await resp.text().catch(() => '');
+
+    // Явно логируем ответ CRM, чтобы было видно подтверждение в обычных логах Render
+    try {
+      const preview = (text || '').slice(0, 500);
+      const logPayload = {
+        status: resp.status,
+        ok: resp.ok,
+        body_preview: preview
+      };
+      if (resp.ok) {
+        console.log('[crm] ответ CRM (успех):', logPayload);
+      } else {
+        console.warn('[crm] ответ CRM (ошибка):', logPayload);
+      }
+    } catch (e) {
+      console.warn('[crm] ошибка логирования ответа CRM:', e);
+    }
+
     return { ok: resp.ok, status: resp.status, text };
   } finally {
     clearTimeout(t);

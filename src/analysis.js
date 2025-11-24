@@ -2,7 +2,16 @@ const OpenAI = require('openai');
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY || '';
 const { dbg } = require('./logger');
-const openai = OPENAI_API_KEY ? new OpenAI({ apiKey: OPENAI_API_KEY }) : null;
+
+// Явный timeout для запросов к OpenAI, чтобы анализ не "висел" слишком долго
+const OPENAI_TIMEOUT_MS = parseInt(process.env.OPENAI_TIMEOUT_MS || '30000', 10);
+
+const openai = OPENAI_API_KEY
+  ? new OpenAI({
+      apiKey: OPENAI_API_KEY,
+      // maxRetries оставляем дефолтным; таймаут контролируем через OPENAI_TIMEOUT_MS
+    })
+  : null;
 
 const DEFAULT_MODEL = process.env.ANALYZE_MODEL || 'gpt-5';
 
@@ -65,15 +74,27 @@ async function analyzeTranscript(transcript, options = {}) {
     });
   } catch {}
 
-  const resp = await openai.chat.completions.create({
-    model: DEFAULT_MODEL,
-    messages: [
-      { role: 'system', content: system },
-      { role: 'user', content: user }
-    ],
-    response_format: { type: 'json_object' }
-  });
-  dbg('[llm] completion created', { model: DEFAULT_MODEL });
+  let resp;
+  try {
+    resp = await openai.chat.completions.create({
+      model: DEFAULT_MODEL,
+      messages: [
+        { role: 'system', content: system },
+        { role: 'user', content: user }
+      ],
+      response_format: { type: 'json_object' },
+      timeout: OPENAI_TIMEOUT_MS
+    });
+    dbg('[llm] completion created', { model: DEFAULT_MODEL });
+  } catch (e) {
+    dbg('[llm] request failed', {
+      error: String(e),
+      code: e?.code,
+      status: e?.status,
+      type: e?.type
+    });
+    throw e;
+  }
   const content = resp.choices?.[0]?.message?.content || '{}';
   try {
     dbg('[llm] raw content', { length: content.length, preview: content.slice(0, 1000) });
@@ -114,15 +135,27 @@ async function analyzeRawText(text, options = {}) {
       user_preview: user.slice(0, 500)
     });
   } catch {}
-  const resp = await openai.chat.completions.create({
-    model: DEFAULT_MODEL,
-    messages: [
-      { role: 'system', content: system },
-      { role: 'user', content: user }
-    ],
-    temperature: 0.2,
-    response_format: { type: 'json_object' }
-  });
+  let resp;
+  try {
+    resp = await openai.chat.completions.create({
+      model: DEFAULT_MODEL,
+      messages: [
+        { role: 'system', content: system },
+        { role: 'user', content: user }
+      ],
+      temperature: 0.2,
+      response_format: { type: 'json_object' },
+      timeout: OPENAI_TIMEOUT_MS
+    });
+  } catch (e) {
+    dbg('[llm] raw request failed', {
+      error: String(e),
+      code: e?.code,
+      status: e?.status,
+      type: e?.type
+    });
+    throw e;
+  }
   const content = resp.choices?.[0]?.message?.content || '{}';
   try {
     dbg('[llm] raw content', { length: content.length, preview: content.slice(0, 1000) });
