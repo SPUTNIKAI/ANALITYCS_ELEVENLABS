@@ -6,10 +6,12 @@ const { dbg } = require('./logger');
 // Явный timeout для запросов к OpenAI, чтобы анализ не "висел" слишком долго
 const OPENAI_TIMEOUT_MS = parseInt(process.env.OPENAI_TIMEOUT_MS || '30000', 10);
 
+// Таймаут задаём на уровне клиента (поддерживаемый параметр SDK),
+// а не в теле запроса, чтобы избежать ошибки "Unknown parameter: 'timeout'".
 const openai = OPENAI_API_KEY
   ? new OpenAI({
       apiKey: OPENAI_API_KEY,
-      // maxRetries оставляем дефолтным; таймаут контролируем через OPENAI_TIMEOUT_MS
+      timeout: OPENAI_TIMEOUT_MS
     })
   : null;
 
@@ -82,8 +84,7 @@ async function analyzeTranscript(transcript, options = {}) {
         { role: 'system', content: system },
         { role: 'user', content: user }
       ],
-      response_format: { type: 'json_object' },
-      timeout: OPENAI_TIMEOUT_MS
+      response_format: { type: 'json_object' }
     });
     dbg('[llm] completion created', { model: DEFAULT_MODEL });
   } catch (e) {
@@ -144,8 +145,7 @@ async function analyzeRawText(text, options = {}) {
         { role: 'user', content: user }
       ],
       temperature: 0.2,
-      response_format: { type: 'json_object' },
-      timeout: OPENAI_TIMEOUT_MS
+      response_format: { type: 'json_object' }
     });
   } catch (e) {
     dbg('[llm] raw request failed', {
