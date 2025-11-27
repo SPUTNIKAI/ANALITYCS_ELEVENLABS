@@ -26,12 +26,19 @@ const app = express();
 // Cookie parser middleware
 app.use(cookieParser());
 
-// Per docs: use raw body to compute HMAC over exact bytes for webhook route only
+// Per docs: use raw body to compute HMAC over exact bytes for webhook route only.
+// Увеличиваем лимит размера тела для вебхука, чтобы длинные транскрипты не падали с PayloadTooLargeError.
 app.use((req, res, next) => {
   if (req.path === '/webhook/elevenlabs') {
-    return bodyParser.raw({ type: '*/*' })(req, res, next);
+    return bodyParser.raw({
+      type: '*/*',
+      limit: process.env.WEBHOOK_MAX_BODY || '5mb'
+    })(req, res, next);
   }
-  return bodyParser.json()(req, res, next);
+  // Для остальных JSON-запросов тоже задаём разумный лимит по умолчанию.
+  return bodyParser.json({
+    limit: process.env.JSON_MAX_BODY || '1mb'
+  })(req, res, next);
 });
 
 const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET || '';
