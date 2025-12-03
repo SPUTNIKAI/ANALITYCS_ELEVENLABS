@@ -83,7 +83,7 @@ async function analyzeTranscript(transcript, options = {}) {
         { role: 'user', content: user }
       ],
       response_format: { type: 'json_object' },
-      timeout: OPENAI_TIMEOUT_MS
+      
     });
     dbg('[llm] completion created', { model: DEFAULT_MODEL });
   } catch (e) {
@@ -145,7 +145,7 @@ async function analyzeRawText(text, options = {}) {
       ],
       temperature: 0.2,
       response_format: { type: 'json_object' },
-      //timeout: OPENAI_TIMEOUT_MS
+      
     });
   } catch (e) {
     dbg('[llm] raw request failed', {
