@@ -11,7 +11,6 @@ const OPENAI_TIMEOUT_MS = parseInt(process.env.OPENAI_TIMEOUT_MS || '30000', 10)
 const openai = OPENAI_API_KEY
   ? new OpenAI({
       apiKey: OPENAI_API_KEY,
-      timeout: OPENAI_TIMEOUT_MS
     })
   : null;
 
