@@ -79,14 +79,14 @@ async function analyzeTranscript(transcript, options = {}) {
   let resp;
   try {
     resp = await openai.chat.completions.create({
-      model: DEFAULT_MODEL,
-      messages: [
-        { role: 'system', content: system },
-        { role: 'user', content: user }
-      ],
-      response_format: { type: 'json_object' }
-    });
-    dbg('[llm] completion created', { model: DEFAULT_MODEL });
+    model: DEFAULT_MODEL,
+    messages: [
+      { role: 'system', content: system },
+      { role: 'user', content: user }
+    ],
+    response_format: { type: 'json_object' }
+  });
+  dbg('[llm] completion created', { model: DEFAULT_MODEL });
   } catch (e) {
     dbg('[llm] request failed', {
       error: String(e),
@@ -139,14 +139,14 @@ async function analyzeRawText(text, options = {}) {
   let resp;
   try {
     resp = await openai.chat.completions.create({
-      model: DEFAULT_MODEL,
-      messages: [
-        { role: 'system', content: system },
-        { role: 'user', content: user }
-      ],
-      temperature: 0.2,
-      response_format: { type: 'json_object' }
-    });
+    model: DEFAULT_MODEL,
+    messages: [
+      { role: 'system', content: system },
+      { role: 'user', content: user }
+    ],
+    temperature: 0.2,
+    response_format: { type: 'json_object' }
+  });
   } catch (e) {
     dbg('[llm] raw request failed', {
       error: String(e),
