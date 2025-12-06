@@ -388,7 +388,8 @@
           ` : ''}
 
           <div class="actions">
-            <button class="btn btn-primary btn-small" onclick="resendLeadToCrm(${event.id})">Переотправить в CRM</button>
+            ${!analysis ? `<button class="btn btn-primary btn-small" onclick="reanalyzeLead(${event.id})">Запустить анализ</button>` : ''}
+            <button class="btn btn-${analysis ? 'primary' : 'secondary'} btn-small" onclick="resendLeadToCrm(${event.id})">Переотправить в CRM</button>
           </div>
         `;
       } catch (error) {
@@ -402,6 +403,25 @@
         alert(`Успешно отправлено в CRM: ${JSON.stringify(result)}`);
       } catch (error) {
         alert(`Ошибка отправки в CRM: ${error.message}`);
+      }
+    }
+
+    async function reanalyzeLead(leadId) {
+      try {
+        const response = await fetch(`/api/events/${leadId}/reanalyze`, {
+          method: 'POST'
+        });
+        const result = await response.json();
+        if (!response.ok) {
+          throw new Error(result.details || result.error || 'Unknown error');
+        }
+        alert(`Анализ выполнен успешно!\nТема: ${result.result?.topic || 'N/A'}\nКачество: ${result.result?.quality || 'N/A'}`);
+        // Перезагружаем модальное окно с обновлёнными данными
+        showLeadModal(leadId);
+        // И обновляем список лидов
+        loadLeads();
+      } catch (error) {
+        alert(`Ошибка анализа: ${error.message}`);
       }
     }
 

@@ -6,10 +6,12 @@ const { dbg } = require('./logger');
 // Явный timeout для запросов к OpenAI, чтобы анализ не "висел" слишком долго
 const OPENAI_TIMEOUT_MS = parseInt(process.env.OPENAI_TIMEOUT_MS || '30000', 10);
 
+// Таймаут задаём на уровне клиента (поддерживаемый параметр SDK),
+// а не в теле запроса, чтобы избежать ошибки "Unknown parameter: 'timeout'".
 const openai = OPENAI_API_KEY
   ? new OpenAI({
       apiKey: OPENAI_API_KEY,
-      // maxRetries оставляем дефолтным; таймаут контролируем через OPENAI_TIMEOUT_MS
+      timeout: OPENAI_TIMEOUT_MS
     })
   : null;
 
@@ -77,15 +79,14 @@ async function analyzeTranscript(transcript, options = {}) {
   let resp;
   try {
     resp = await openai.chat.completions.create({
-      model: DEFAULT_MODEL,
-      messages: [
-        { role: 'system', content: system },
-        { role: 'user', content: user }
-      ],
-      response_format: { type: 'json_object' },
-      
-    });
-    dbg('[llm] completion created', { model: DEFAULT_MODEL });
+    model: DEFAULT_MODEL,
+    messages: [
+      { role: 'system', content: system },
+      { role: 'user', content: user }
+    ],
+    response_format: { type: 'json_object' }
+  });
+  dbg('[llm] completion created', { model: DEFAULT_MODEL });
   } catch (e) {
     dbg('[llm] request failed', {
       error: String(e),
@@ -101,21 +102,30 @@ async function analyzeTranscript(transcript, options = {}) {
   } catch {}
   try {
     const parsed = JSON.parse(content);
-  try {
-    dbg('[llm] parsed result', {
-      topic: parsed?.topic,
-      intent: parsed?.intent,
-      quality: parsed?.quality,
-      outcome: parsed?.outcome,
-      summary_preview: parsed?.summary_ru?.slice(0, 80),
-      client_name: parsed?.client_name,
-      phone: parsed?.phone
-    });
-  } catch {}
+    try {
+      dbg('[llm] parsed result', {
+        topic: parsed?.topic,
+        intent: parsed?.intent,
+        quality: parsed?.quality,
+        outcome: parsed?.outcome,
+        summary_preview: parsed?.summary_ru?.slice(0, 80),
+        client_name: parsed?.client_name,
+        phone: parsed?.phone
+      });
+    } catch {}
+
+    // Валидация: если результат не содержит ключевых полей, считаем анализ неуспешным
+    const hasRequiredFields = parsed && (parsed.topic || parsed.intent || parsed.outcome || parsed.summary_ru);
+    if (!hasRequiredFields) {
+      console.warn('[llm] analysis result is empty or missing required fields', { content_preview: content.slice(0, 200) });
+      const emptyResult = { ...parsed, _analysis_error: 'empty_or_invalid_result' };
+      return emptyResult;
+    }
+
     return parsed;
   } catch (e) {
-    dbg('[llm] parse error, returning empty object', { error: String(e) });
-    return {};
+    console.warn('[llm] parse error', { error: String(e), content_preview: content.slice(0, 200) });
+    return { _analysis_error: 'json_parse_failed', _raw_content: content.slice(0, 500) };
   }
 }
 
@@ -138,15 +148,14 @@ async function analyzeRawText(text, options = {}) {
   let resp;
   try {
     resp = await openai.chat.completions.create({
-      model: DEFAULT_MODEL,
-      messages: [
-        { role: 'system', content: system },
-        { role: 'user', content: user }
-      ],
-      temperature: 0.2,
-      response_format: { type: 'json_object' },
-      
-    });
+    model: DEFAULT_MODEL,
+    messages: [
+      { role: 'system', content: system },
+      { role: 'user', content: user }
+    ],
+    temperature: 0.2,
+    response_format: { type: 'json_object' }
+  });
   } catch (e) {
     dbg('[llm] raw request failed', {
       error: String(e),

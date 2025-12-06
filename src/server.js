@@ -26,12 +26,19 @@ const app = express();
 // Cookie parser middleware
 app.use(cookieParser());
 
-// Per docs: use raw body to compute HMAC over exact bytes for webhook route only
+// Per docs: use raw body to compute HMAC over exact bytes for webhook route only.
+// Увеличиваем лимит размера тела для вебхука, чтобы длинные транскрипты не падали с PayloadTooLargeError.
 app.use((req, res, next) => {
   if (req.path === '/webhook/elevenlabs') {
-    return bodyParser.raw({ type: '*/*' })(req, res, next);
+    return bodyParser.raw({
+      type: '*/*',
+      limit: process.env.WEBHOOK_MAX_BODY || '5mb'
+    })(req, res, next);
   }
-  return bodyParser.json()(req, res, next);
+  // Для остальных JSON-запросов тоже задаём разумный лимит по умолчанию.
+  return bodyParser.json({
+    limit: process.env.JSON_MAX_BODY || '1mb'
+  })(req, res, next);
 });
 
 const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET || '';
@@ -121,24 +128,52 @@ function appendEvent(event) {
 }
 
 async function analyzeEvent(event) {
+  const eventId = event?.id;
   const transcript = event?.payload?.data?.transcript || [];
-  dbg('[analyze] start', { event_id: event?.id, transcript_len: Array.isArray(transcript) ? transcript.length : 0, model: process.env.ANALYZE_MODEL || 'gpt-5' });
+  const transcriptLen = Array.isArray(transcript) ? transcript.length : 0;
+  
+  console.log('[analyze] start', { event_id: eventId, transcript_len: transcriptLen, model: process.env.ANALYZE_MODEL || 'gpt-5' });
+  dbg('[analyze] start', { event_id: eventId, transcript_len: transcriptLen, model: process.env.ANALYZE_MODEL || 'gpt-5' });
+
+  // Проверяем, есть ли вообще транскрипт
+  if (transcriptLen === 0) {
+    console.warn('[analyze] empty transcript, skipping LLM call', { event_id: eventId });
+    await markProcessed([eventId], 'skipped: empty transcript');
+    return { skipped: true, reason: 'empty_transcript' };
+  }
+
   const result = await analyzeTranscript(transcript);
-  dbg('[analyze] result', { event_id: event?.id, topic: result?.topic, intent: result?.intent, quality: result?.quality, outcome: result?.outcome, phone: result?.phone });
-  const saved = await insertAnalysis(event.id, process.env.ANALYZE_MODEL || 'gpt-5', result);
-  await markProcessed([event.id], 'auto analyzed');
+  
+  // Проверяем, успешен ли анализ (нет ли маркера ошибки)
+  if (result?._analysis_error) {
+    console.warn('[analyze] analysis returned error marker', { event_id: eventId, error: result._analysis_error });
+    // Помечаем как обработанное с ошибкой, чтобы не блокировать очередь
+    await markProcessed([eventId], `analysis_error: ${result._analysis_error}`);
+    // Сохраняем результат с ошибкой для отладки
+    await insertAnalysis(eventId, process.env.ANALYZE_MODEL || 'gpt-5', result);
+    return { error: result._analysis_error };
+  }
+
+  console.log('[analyze] result', { event_id: eventId, topic: result?.topic, intent: result?.intent, quality: result?.quality, outcome: result?.outcome, phone: result?.phone });
+  dbg('[analyze] result', { event_id: eventId, topic: result?.topic, intent: result?.intent, quality: result?.quality, outcome: result?.outcome, phone: result?.phone });
+  
+  const saved = await insertAnalysis(eventId, process.env.ANALYZE_MODEL || 'gpt-5', result);
+  await markProcessed([eventId], 'auto analyzed');
+  
   try {
     await appendCrmEntry(event, result);
   } catch (e) {
-    console.warn('crm append failed', e);
+    console.warn('[crm] append to md failed', { event_id: eventId, error: String(e) });
   }
   try {
     const sent = await sendLeadAnalytics(event, result);
     if (!sent?.sent) {
-      console.warn('external CRM send failed', sent);
+      console.warn('[crm] external CRM send failed', { event_id: eventId, result: sent });
+    } else {
+      console.log('[crm] external CRM send success', { event_id: eventId });
     }
   } catch (e) {
-    console.warn('external CRM send threw', e);
+    console.warn('[crm] external CRM send threw', { event_id: eventId, error: String(e) });
   }
   return saved;
 }
@@ -233,11 +268,20 @@ app.post('/webhook/elevenlabs', async (req, res) => {
       const rows = await fetchUnprocessed(1);
       if (rows.length) {
         const ev = rows[0];
+        console.log('[analyze] scheduling background analysis', { event_id: ev.id });
         dbg('[analyze] scheduling background analysis', { event_id: ev.id });
-        limiter.schedule(() => analyzeEvent(ev)).catch(err => console.warn('auto analyze failed', err));
+        limiter.schedule(() => analyzeEvent(ev)).catch(async (err) => {
+          console.error('[analyze] auto analyze failed', { event_id: ev.id, error: String(err), stack: err?.stack?.slice(0, 500) });
+          // Помечаем событие как обработанное с ошибкой, чтобы не блокировать очередь
+          try {
+            await markProcessed([ev.id], `auto_analyze_error: ${String(err).slice(0, 200)}`);
+          } catch (markErr) {
+            console.error('[analyze] failed to mark event as processed after error', { event_id: ev.id, error: String(markErr) });
+          }
+        });
       }
     } catch (e) {
-      console.warn('auto analyze scheduling failed', e);
+      console.warn('[analyze] auto analyze scheduling failed', { error: String(e) });
     }
   }
 

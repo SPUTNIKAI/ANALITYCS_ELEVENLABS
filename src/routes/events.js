@@ -1,6 +1,8 @@
 const express = require('express');
-const { pool, getEventById, getLatestAnalysisByEventId } = require('../db');
+const { pool, getEventById, getLatestAnalysisByEventId, insertAnalysis, markProcessed } = require('../db');
 const { sendLeadAnalytics } = require('../externalCrm');
+const { analyzeTranscript } = require('../analysis');
+const { appendCrmEntry } = require('../crmWriter');
 const { dbg } = require('../logger');
 
 const router = express.Router();
@@ -176,5 +178,61 @@ router.post('/events/:id/resend-crm', async (req, res) => {
     return res.status(200).json({ event_id: id, ...sent });
   } catch (e) {
     return res.status(500).json({ error: 'resend_failed', details: String(e) });
+  }
+});
+
+// Ручной перезапуск анализа для конкретного события
+router.post('/events/:id/reanalyze', async (req, res) => {
+  try {
+    if (!pool) return res.status(503).json({ error: 'no_database' });
+    const id = parseInt(req.params.id, 10);
+    if (!Number.isFinite(id)) return res.status(400).json({ error: 'bad_id' });
+
+    const event = await getEventById(id);
+    if (!event) return res.status(404).json({ error: 'not_found' });
+
+    const transcript = event?.payload?.data?.transcript || [];
+    if (!Array.isArray(transcript) || transcript.length === 0) {
+      return res.status(400).json({ error: 'empty_transcript', message: 'No transcript data to analyze' });
+    }
+
+    console.log('[analyze/api] manual reanalyze requested', { event_id: id, transcript_len: transcript.length });
+
+    const result = await analyzeTranscript(transcript);
+
+    // Проверяем на ошибку анализа
+    if (result?._analysis_error) {
+      console.warn('[analyze/api] reanalyze returned error', { event_id: id, error: result._analysis_error });
+      return res.status(422).json({ 
+        error: 'analysis_failed', 
+        details: result._analysis_error,
+        raw_content: result._raw_content || null 
+      });
+    }
+
+    // Сохраняем результат
+    const saved = await insertAnalysis(id, process.env.ANALYZE_MODEL || 'gpt-5', result);
+    await markProcessed([id], 'manual reanalyze');
+
+    console.log('[analyze/api] reanalyze success', { event_id: id, topic: result?.topic, quality: result?.quality });
+
+    // Отправляем в CRM
+    let crmResult = null;
+    try {
+      await appendCrmEntry(event, result);
+      crmResult = await sendLeadAnalytics(event, result, { force: true });
+    } catch (e) {
+      console.warn('[analyze/api] CRM send after reanalyze failed', { event_id: id, error: String(e) });
+    }
+
+    return res.status(200).json({ 
+      event_id: id, 
+      analysis_id: saved?.id,
+      result,
+      crm: crmResult
+    });
+  } catch (e) {
+    console.error('[analyze/api] reanalyze failed', { error: String(e), stack: e?.stack?.slice(0, 500) });
+    return res.status(500).json({ error: 'reanalyze_failed', details: String(e) });
   }
 });
