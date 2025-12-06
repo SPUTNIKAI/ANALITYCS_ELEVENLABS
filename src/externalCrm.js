@@ -13,6 +13,8 @@ const EXTERNAL_CRM_DRY_RUN = (process.env.EXTERNAL_CRM_DRY_RUN || 'false') === '
 const CRM_TRUSTED_ORIGIN = process.env.CRM_TRUSTED_ORIGIN || '';
 const CRM_REFERER = process.env.CRM_REFERER || '';
 const CRM_LEAD_SOURCE = process.env.CRM_LEAD_SOURCE || 'LLM Analytics';
+// Требовать наличие телефона в результате анализа LLM для отправки в CRM
+const CRM_REQUIRE_PHONE = (process.env.CRM_REQUIRE_PHONE || 'true') === 'true';
 
 function buildAuthorizationHeader() {
   if (CRM_BASIC_AUTH_USER && CRM_BASIC_AUTH_PASS) {
@@ -188,13 +190,31 @@ async function postToBpmsoft(payload) {
 
 async function sendLeadAnalytics(eventRow, analysis, options = {}) {
   const force = Boolean(options.force);
+  const eventId = eventRow?.id;
+
   if (!EXTERNAL_CRM_ENABLED) {
     dbg('[crm] external CRM disabled, skip send');
     return { sent: false, reason: 'disabled' };
   }
   if (!CRM_SERVICE_URL || !CRM_LANDING_ID) return { sent: false, reason: 'not_configured' };
-  if (!force && eventRow?.id && await hasSuccessfulCrmDispatch(eventRow.id)) {
-    dbg('[crm] already sent for event, skip', { event_id: eventRow.id });
+
+  // Проверяем наличие телефона в результате анализа LLM
+  // Телефон должен быть непустой строкой и содержать хотя бы несколько цифр
+  const phoneFromAnalysis = analysis?.phone || '';
+  const phoneDigits = phoneFromAnalysis.replace(/\D/g, '');
+  const hasValidPhone = phoneDigits.length >= 7; // минимум 7 цифр для валидного номера
+
+  if (CRM_REQUIRE_PHONE && !hasValidPhone) {
+    console.log('[crm] skip send: no valid phone in LLM analysis', { 
+      event_id: eventId, 
+      phone_raw: phoneFromAnalysis,
+      phone_digits: phoneDigits.length 
+    });
+    return { sent: false, reason: 'no_phone_in_analysis' };
+  }
+
+  if (!force && eventId && await hasSuccessfulCrmDispatch(eventId)) {
+    dbg('[crm] already sent for event, skip', { event_id: eventId });
     return { sent: false, reason: 'already_sent' };
   }
   const payload = buildBpmsoftPayload(eventRow, analysis);
